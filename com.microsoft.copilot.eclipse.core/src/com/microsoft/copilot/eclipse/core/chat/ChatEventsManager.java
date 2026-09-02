@@ -4,7 +4,9 @@
 package com.microsoft.copilot.eclipse.core.chat;
 
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 
 import com.microsoft.copilot.eclipse.core.lsp.protocol.ChatProgressValue;
 import com.microsoft.copilot.eclipse.core.lsp.protocol.InvokeClientToolConfirmationParams;
@@ -26,6 +28,8 @@ public class ChatEventsManager {
    * List of agent tool listeners.
    */
   public ToolInvocationListener agentToolListener;
+  private final Map<String, ChatProgressListener> progressRoutes = new ConcurrentHashMap<>();
+  private final Map<String, ChatProgressListener> conversationRoutes = new ConcurrentHashMap<>();
 
   /**
    * Creates a new chat progress provider.
@@ -52,9 +56,40 @@ public class ChatEventsManager {
    * Notify the progress to the listeners.
    */
   public void notifyProgress(ChatProgressValue message) {
-    for (ChatProgressListener listener : this.chatProgressListeners) {
-      listener.onChatProgress(message);
+    notifyProgress(null, message);
+  }
+
+  /**
+   * Route progress to the session that owns its work-done token, then notify
+   * non-session observers.
+   */
+  public void notifyProgress(String workDoneToken, ChatProgressValue message) {
+    ChatProgressListener routed = workDoneToken != null ? progressRoutes.get(workDoneToken) : null;
+    if (routed == null && message != null && message.getConversationId() != null) {
+      routed = conversationRoutes.get(message.getConversationId());
     }
+    if (routed != null) {
+      routed.onChatProgress(message);
+      if (message != null && message.getConversationId() != null) {
+        conversationRoutes.put(message.getConversationId(), routed);
+      }
+    }
+    for (ChatProgressListener listener : this.chatProgressListeners) {
+      if (listener != routed) {
+        listener.onChatProgress(message);
+      }
+    }
+  }
+
+  public void registerProgressRoute(String workDoneToken, ChatProgressListener listener) {
+    if (workDoneToken != null && listener != null) {
+      progressRoutes.put(workDoneToken, listener);
+    }
+  }
+
+  public void unregisterProgressRoutes(ChatProgressListener listener) {
+    progressRoutes.entrySet().removeIf(entry -> entry.getValue() == listener);
+    conversationRoutes.entrySet().removeIf(entry -> entry.getValue() == listener);
   }
 
   /**

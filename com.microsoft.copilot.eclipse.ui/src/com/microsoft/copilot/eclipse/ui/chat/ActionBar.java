@@ -122,6 +122,7 @@ public class ActionBar extends Composite implements NewConversationListener {
   private Composite inputArea;
 
   private ChatServiceManager chatServiceManager;
+  private final String sessionId;
   IEventBroker eventBroker;
   EventHandler updateSendButtonToCancelButtonHandler;
   EventHandler featureFlagsChangedEventHandler;
@@ -135,7 +136,15 @@ public class ActionBar extends Composite implements NewConversationListener {
    * Creates a new InputArea.
    */
   public ActionBar(Composite parent, int style, ChatServiceManager chatServiceManager) {
+    this(parent, style, chatServiceManager, "");
+  }
+
+  /**
+   * Creates an input area scoped to one chat session.
+   */
+  public ActionBar(Composite parent, int style, ChatServiceManager chatServiceManager, String sessionId) {
     super(parent, SWT.NONE);
+    this.sessionId = sessionId;
     GridLayout glContainer = new GridLayout(1, false);
     glContainer.marginWidth = 10;
     glContainer.marginHeight = 0;
@@ -145,7 +154,9 @@ public class ActionBar extends Composite implements NewConversationListener {
     this.setData(CssConstants.CSS_ID_KEY, "chat-action-bar-wrapper");
     this.chatServiceManager = chatServiceManager;
     this.updateSendButtonToCancelButtonHandler = event -> {
-      updateButtonState(SendOrCancelButtonStates.CANCEL_ENABLED);
+      if (ChatSessionEvent.isForSession(event, this.sessionId)) {
+        updateButtonState(SendOrCancelButtonStates.CANCEL_ENABLED);
+      }
     };
     this.eventBroker = PlatformUI.getWorkbench().getService(IEventBroker.class);
     this.eventBroker.subscribe(CopilotEventConstants.TOPIC_CHAT_ON_SEND, updateSendButtonToCancelButtonHandler);
@@ -621,6 +632,7 @@ public class ActionBar extends Composite implements NewConversationListener {
         // Notify ChatView to enable/disable the handler
         Map<String, Object> data = new HashMap<>();
         data.put("enabled", selected);
+        data.put(ChatSessionEvent.SESSION_ID, sessionId);
         eventBroker.post(CopilotEventConstants.TOPIC_CHAT_AUTO_BREAKPOINT_TOGGLE, data);
       }
     });
@@ -835,7 +847,8 @@ public class ActionBar extends Composite implements NewConversationListener {
     resetSendButton();
     notifyCancel();
     IEventBroker eventBroker = PlatformUI.getWorkbench().getService(IEventBroker.class);
-    eventBroker.post(CopilotEventConstants.TOPIC_CHAT_MESSAGE_CANCELLED, null);
+    eventBroker.post(CopilotEventConstants.TOPIC_CHAT_MESSAGE_CANCELLED,
+        ChatSessionEvent.forSession(sessionId));
   }
 
   private void notifyCancel() {
@@ -909,7 +922,8 @@ public class ActionBar extends Composite implements NewConversationListener {
    * @param message the message
    */
   public void notifySend(String workDoneToken, String message) {
-    Map<String, Object> properties = Map.of("workDoneToken", workDoneToken, "message", message, "createNewTurn", true);
+    Map<String, Object> properties = Map.of("workDoneToken", workDoneToken, "message", message, "createNewTurn", true,
+        ChatSessionEvent.SESSION_ID, sessionId);
     this.eventBroker.post(CopilotEventConstants.TOPIC_CHAT_MESSAGE_SEND, properties);
   }
 
@@ -924,7 +938,8 @@ public class ActionBar extends Composite implements NewConversationListener {
   public void notifySendWithSlug(String workDoneToken, String message, String agentSlug,
       String agentJobWorkspaceFolder) {
     Map<String, Object> properties = Map.of("workDoneToken", workDoneToken, "message", message, "agentSlug", agentSlug,
-        "agentJobWorkspaceFolder", agentJobWorkspaceFolder, "createNewTurn", true);
+        "agentJobWorkspaceFolder", agentJobWorkspaceFolder, "createNewTurn", true,
+        ChatSessionEvent.SESSION_ID, sessionId);
     this.eventBroker.post(CopilotEventConstants.TOPIC_CHAT_MESSAGE_SEND, properties);
   }
 

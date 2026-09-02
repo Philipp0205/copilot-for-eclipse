@@ -18,14 +18,13 @@ import org.eclipse.jdt.debug.core.IJavaStackFrame;
 import org.eclipse.lsp4j.WorkDoneProgressKind;
 import org.eclipse.swt.widgets.Display;
 
-import com.microsoft.copilot.eclipse.core.Constants;
 import com.microsoft.copilot.eclipse.core.CopilotCore;
 import com.microsoft.copilot.eclipse.core.chat.ChatProgressListener;
 import com.microsoft.copilot.eclipse.core.lsp.protocol.ChatProgressValue;
 import com.microsoft.copilot.eclipse.ui.chat.ActionBar;
 import com.microsoft.copilot.eclipse.ui.chat.ChatView;
 import com.microsoft.copilot.eclipse.ui.chat.tools.JavaDebuggerToolAdapter;
-import com.microsoft.copilot.eclipse.ui.utils.UiUtils;
+import com.microsoft.copilot.eclipse.ui.CopilotUi;
 
 /**
  * Handles debug events and automatically sends chat messages when breakpoints are hit
@@ -311,7 +310,8 @@ public class DebugEventAutoResponseHandler implements IDebugEventSetListener, Ch
 
     // Simulate user input on the UI thread
     Display.getDefault().asyncExec(() -> {
-      ChatView chatView = UiUtils.getView(Constants.CHAT_VIEW_ID, ChatView.class);
+      ChatServiceManager manager = CopilotUi.getPlugin().getChatServiceManager();
+      ChatView chatView = manager != null ? manager.getSessionRegistry().getActiveView() : null;
       if (chatView == null) {
         return;
       }

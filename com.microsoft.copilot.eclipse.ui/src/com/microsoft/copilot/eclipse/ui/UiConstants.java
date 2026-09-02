@@ -26,6 +26,12 @@ public class UiConstants {
   public static final String OPEN_URL_COMMAND_ID = "com.microsoft.copilot.eclipse.commands.openUrl";
   public static final String OPEN_URL_PARAMETER_NAME = "com.microsoft.copilot.eclipse.commands.openUrl.url";
   public static final String OPEN_CHAT_VIEW_COMMAND_ID = "com.microsoft.copilot.eclipse.commands.openChatView";
+  public static final String NEW_COPILOT_SESSION_COMMAND_ID =
+      "com.microsoft.copilot.eclipse.commands.newCopilotSession";
+  public static final String OPEN_COPILOT_SESSIONS_COMMAND_ID =
+      "com.microsoft.copilot.eclipse.commands.openCopilotSessions";
+  public static final String COPILOT_SESSIONS_VIEW_ID =
+      "com.microsoft.copilot.eclipse.ui.chat.CopilotSessionsView";
   public static final String OPEN_QUICK_START_COMMAND_ID = "com.microsoft.copilot.eclipse.commands.openQuickStart";
   public static final String OPEN_WHATS_NEW_COMMAND_ID = "com.microsoft.copilot.eclipse.commands.showWhatIsNew";
   public static final String COPILOT_FEEDBACK_FORUM_URL = "https://aka.ms/copiloteclipse-feedback";

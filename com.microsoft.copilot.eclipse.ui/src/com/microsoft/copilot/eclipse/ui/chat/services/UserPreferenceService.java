@@ -54,7 +54,7 @@ public class UserPreferenceService extends ChatBaseService implements CopilotAut
 
   // Track side effects for chat mode button only
   private final Map<DropdownButton, ISideEffect[]> chatModeButtonSideEffects = new HashMap<>();
-  private ISideEffect chatViewSideEffect;
+  private final Map<ChatView, ISideEffect> chatViewSideEffects = new HashMap<>();
 
   // Event handling
   private IEventBroker eventBroker;
@@ -485,28 +485,37 @@ public class UserPreferenceService extends ChatBaseService implements CopilotAut
       return;
     }
 
-    // Unbind any previously bound chat view
-    unbindChatView();
+    unbindChatView(chatView);
 
     // Create a side effect that watches activeChatModeObservable and rebuilds the view
-    ensureRealm(() -> chatViewSideEffect = ISideEffect.create(() -> {
+    ensureRealm(() -> chatViewSideEffects.put(chatView, ISideEffect.create(() -> {
       return this.activeChatModeObservable.getValue();
     }, (ChatMode viewMode) -> {
       if (viewMode != null) {
         // Rebuild the view for Ask or Agent layout
         chatView.buildViewFor(viewMode);
       }
-    }));
+    })));
   }
 
   /**
-   * Unbind the currently bound chat view if any.
+   * Unbind a chat view.
+   */
+  public void unbindChatView(ChatView chatView) {
+    ISideEffect sideEffect = chatViewSideEffects.remove(chatView);
+    if (sideEffect != null) {
+      sideEffect.dispose();
+    }
+  }
+
+  /**
+   * Unbind all chat views.
    */
   public void unbindChatView() {
-    if (chatViewSideEffect != null) {
-      chatViewSideEffect.dispose();
-      chatViewSideEffect = null;
+    for (ISideEffect sideEffect : chatViewSideEffects.values()) {
+      sideEffect.dispose();
     }
+    chatViewSideEffects.clear();
   }
 
   /**

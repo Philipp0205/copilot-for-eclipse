@@ -11,6 +11,7 @@ import org.eclipse.ui.progress.IProgressConstants;
 import org.eclipse.ui.texteditor.templates.TemplatesView;
 
 import com.microsoft.copilot.eclipse.core.Constants;
+import com.microsoft.copilot.eclipse.ui.UiConstants;
 
 /**
  * Copilot Perspective.
@@ -25,6 +26,7 @@ public class CopilotPerspectiveFactory implements IPerspectiveFactory {
     // Right
     IFolderLayout copilotLayout = layout.createFolder("right", IPageLayout.RIGHT, 0.75f, editorArea);
     copilotLayout.addView(Constants.CHAT_VIEW_ID);
+    copilotLayout.addView(UiConstants.COPILOT_SESSIONS_VIEW_ID);
     copilotLayout.addView(Constants.GITHUB_JOBS_VIEW_ID);
 
     // Left
@@ -59,6 +61,7 @@ public class CopilotPerspectiveFactory implements IPerspectiveFactory {
     layout.addShowViewShortcut("org.eclipse.pde.runtime.LogView");
     layout.addShowViewShortcut("org.eclipse.search.ui.views.SearchView");
     layout.addShowViewShortcut(Constants.GITHUB_JOBS_VIEW_ID);
+    layout.addShowViewShortcut(UiConstants.COPILOT_SESSIONS_VIEW_ID);
 
     // 'Window' > 'Perspective' > 'Open Perspective' contributions
     layout.addPerspectiveShortcut("org.eclipse.debug.ui.DebugPerspective");

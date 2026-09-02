@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.eclipse.core.runtime.Platform;
@@ -57,7 +58,7 @@ import com.microsoft.copilot.eclipse.ui.utils.SwtUtils;
  */
 public class AgentToolService implements ToolInvocationListener, TerminalServiceManager.TerminalServiceListener {
   private ConcurrentHashMap<String, BaseTool> tools;
-  private ChatView boundChatView;
+  private final CopyOnWriteArraySet<ChatView> boundChatViews = new CopyOnWriteArraySet<>();
 
   protected CopilotLanguageServerConnection lsConnection;
   private volatile boolean terminalToolsRegistered = false;
@@ -203,17 +204,21 @@ public class AgentToolService implements ToolInvocationListener, TerminalService
     if (chatView == null) {
       return;
     }
-
-    // Unbind any previously bound chat view
-    unbindChatView();
-    this.boundChatView = chatView;
+    boundChatViews.add(chatView);
   }
 
   /**
-   * Unbind the currently bound chat view if any.
+   * Unbind a chat view.
+   */
+  public void unbindChatView(ChatView chatView) {
+    boundChatViews.remove(chatView);
+  }
+
+  /**
+   * Unbind all chat views.
    */
   public void unbindChatView() {
-    boundChatView = null;
+    boundChatViews.clear();
   }
 
   /**
@@ -232,24 +237,34 @@ public class AgentToolService implements ToolInvocationListener, TerminalService
       return CompletableFuture.completedFuture(new LanguageModelToolResult[] { result });
     }
 
-    return tool.invoke(input, chatView);
+    FileToolService fileToolService = CopilotUi.getPlugin().getChatServiceManager().getFileToolService();
+    if (chatView != null) {
+      fileToolService.enterInvocationSession(chatView.getSessionId());
+    }
+    try {
+      return tool.invoke(input, chatView);
+    } finally {
+      fileToolService.exitInvocationSession();
+    }
   }
 
   @Override
   public CompletableFuture<LanguageModelToolResult[]> onToolInvocation(InvokeClientToolParams params) {
-    if (!validToolConfirmInvokeParams(params.getConversationId(), params.getTurnId())) {
+    ChatView chatView = resolveChatView(params.getConversationId(), params.getTurnId());
+    if (chatView == null) {
       LanguageModelToolResult result = new LanguageModelToolResult();
       result.setStatus(ToolInvocationStatus.cancelled);
       result.addContent("Tool invocation cancelled: conversation was cancelled or turn no longer exists");
       return CompletableFuture.completedFuture(new LanguageModelToolResult[] { result });
     }
-    return invokeTool(params.getName(), (Map<String, Object>) params.getInput(), boundChatView);
+    return invokeTool(params.getName(), (Map<String, Object>) params.getInput(), chatView);
   }
 
   @Override
   public CompletableFuture<LanguageModelToolConfirmationResult> onToolConfirmation(
       InvokeClientToolConfirmationParams params) {
-    if (!validToolConfirmInvokeParams(params.getConversationId(), params.getTurnId())) {
+    ChatView chatView = resolveChatView(params.getConversationId(), params.getTurnId());
+    if (chatView == null) {
       // Return DISMISS when conversation is cancelled or turn no longer exists
       LanguageModelToolConfirmationResult result = new LanguageModelToolConfirmationResult(
           ToolConfirmationResult.DISMISS);
@@ -259,12 +274,12 @@ public class AgentToolService implements ToolInvocationListener, TerminalService
     // Resolve the session conversation ID: map subagent conversations to the
     // parent so that session-scoped approvals apply to the whole chat.
     String sessionConversationId = params.getConversationId();
-    if (boundChatView != null
+    if (chatView != null
         && !Objects.equals(sessionConversationId,
-            boundChatView.getConversationId())
+            chatView.getConversationId())
         && Objects.equals(sessionConversationId,
-            boundChatView.getSubagentConversationId())) {
-      sessionConversationId = boundChatView.getConversationId();
+            chatView.getSubagentConversationId())) {
+      sessionConversationId = chatView.getConversationId();
     }
 
     // Auto-approve evaluation
@@ -279,7 +294,7 @@ public class AgentToolService implements ToolInvocationListener, TerminalService
           new LanguageModelToolConfirmationResult(ToolConfirmationResult.DISMISS));
     }
 
-    BaseTurnWidget turnWidget = boundChatView.getChatContentViewer().getTurnWidget(params.getTurnId());
+    BaseTurnWidget turnWidget = chatView.getChatContentViewer().getTurnWidget(params.getTurnId());
     if (turnWidget == null) {
       LanguageModelToolConfirmationResult result = new LanguageModelToolConfirmationResult(
           ToolConfirmationResult.DISMISS);
@@ -288,13 +303,18 @@ public class AgentToolService implements ToolInvocationListener, TerminalService
 
     // Get the active turn widget (may be a subagent widget if in subagent context)
     BaseTurnWidget activeTurnWidget = turnWidget.getActiveTurnWidget();
+    ChatServiceManager manager = CopilotUi.getPlugin().getChatServiceManager();
+    if (manager != null) {
+      manager.getSessionRegistry().updateStatus(chatView.getSessionId(),
+          CopilotSession.Status.AWAITING_CONFIRMATION);
+    }
 
     AtomicReference<CompletableFuture<LanguageModelToolConfirmationResult>> ref = new AtomicReference<>();
     ConfirmationContent content = autoApproveResult.getContent();
     SwtUtils.invokeOnDisplayThread(() -> {
       ref.set(activeTurnWidget.requestToolExecutionConfirmation(
           content, params.getInput()));
-      boundChatView.getChatContentViewer().refreshScrollerLayout();
+      chatView.getChatContentViewer().refreshScrollerLayout();
     });
 
     CompletableFuture<LanguageModelToolConfirmationResult> future = ref.get();
@@ -313,27 +333,24 @@ public class AgentToolService implements ToolInvocationListener, TerminalService
         return result;
       });
     }
+    if (future != null && manager != null) {
+      future = future.whenComplete((result, error) -> manager.getSessionRegistry()
+          .updateStatus(chatView.getSessionId(), error == null
+              ? CopilotSession.Status.RUNNING : CopilotSession.Status.FAILED));
+    }
     return future;
   }
 
-  private boolean validToolConfirmInvokeParams(String conversationId, String turnId) {
-    if (boundChatView == null) {
-      return false;
+  private ChatView resolveChatView(String conversationId, String turnId) {
+    for (ChatView chatView : boundChatViews) {
+      boolean conversationIdMatches = Objects.equals(conversationId, chatView.getConversationId())
+          || Objects.equals(conversationId, chatView.getSubagentConversationId());
+      ChatContentViewer viewer = chatView.getChatContentViewer();
+      if (conversationIdMatches && viewer != null && viewer.getTurnWidget(turnId) != null) {
+        return chatView;
+      }
     }
-
-    // Check if the conversation ID matches either the main conversation ID or the subagent conversation ID
-    boolean conversationIdMatches = Objects.equals(conversationId, boundChatView.getConversationId())
-        || Objects.equals(conversationId, boundChatView.getSubagentConversationId());
-
-    if (!conversationIdMatches) {
-      return false;
-    }
-
-    ChatContentViewer chatContentViewer = boundChatView.getChatContentViewer();
-    if (chatContentViewer == null || chatContentViewer.getTurnWidget(turnId) == null) {
-      return false;
-    }
-    return true;
+    return null;
   }
 
   /**
