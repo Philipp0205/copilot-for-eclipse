@@ -1,0 +1,25 @@
+[
+  { "action": "waitForIdle" },
+  { "action": "showView", "idRef": "com.microsoft.copilot.eclipse.ui.chat.ChatView" },
+  { "action": "waitFor", "locator": { "by": "styledText" }, "timeoutSec": 30 },
+
+  { "action": "click", "locator": { "by": "styledText" } },
+  { "action": "typeIn", "locator": { "by": "styledText" }, "text": "Explain this workspace in one paragraph." },
+  { "action": "waitFor", "locator": { "by": "buttonWithTooltip", "tooltip": "Send" }, "timeoutSec": 30 },
+  { "action": "click", "locator": { "by": "buttonWithTooltip", "tooltip": "Send" } },
+
+  { "action": "invokeCommand", "idRef": "com.microsoft.copilot.eclipse.commands.newCopilotSession" },
+  { "action": "waitForIdle" },
+  { "action": "waitFor", "locator": { "by": "styledText" }, "timeoutSec": 30 },
+  { "action": "click", "locator": { "by": "styledText" } },
+  { "action": "typeIn", "locator": { "by": "styledText" }, "text": "List the top-level modules." },
+  { "action": "waitFor", "locator": { "by": "buttonWithTooltip", "tooltip": "Send" }, "timeoutSec": 30 },
+  { "action": "click", "locator": { "by": "buttonWithTooltip", "tooltip": "Send" } },
+
+  { "action": "invokeCommand", "idRef": "com.microsoft.copilot.eclipse.commands.openCopilotSessions" },
+  { "action": "waitForIdle" },
+  { "action": "assertExists",
+    "locator": { "by": "viewId", "id": "com.microsoft.copilot.eclipse.ui.chat.CopilotSessionsView" } },
+  { "action": "screenshot", "id": "parallel-sessions-overview" },
+  { "action": "dumpUi", "id": "parallel-sessions-overview" }
+]

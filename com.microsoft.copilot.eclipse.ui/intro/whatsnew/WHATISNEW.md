@@ -1,5 +1,16 @@
 # GitHub Copilot 0.19.0 Release Notes
 
+### Parallel Copilot Sessions
+Run independent Copilot conversations side by side. Use **New Copilot Session**
+from the Chat toolbar to open another chat view while an existing request keeps
+running.
+
+The new **Copilot Sessions** view combines open sessions and conversation
+history. It shows live running, confirmation, idle, and failed states; opening
+an item focuses its existing chat or restores it in a new view.
+
+---
+
 ### Agent Tool Auto-Approve Controls
 Agent Mode now supports auto-approve controls for tool confirmations. Configure rules for terminal commands, file operations, and MCP tools from Copilot preferences, or use the confirmation dialog's **Allow for Session** and **Always Allow** actions to keep trusted workflows moving without repeated prompts.
 
