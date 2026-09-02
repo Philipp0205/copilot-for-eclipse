@@ -29,23 +29,9 @@ public final class SessionViewOpener {
   private SessionViewOpener() {
   }
 
+  /** Open a new empty Copilot session. */
   public static ChatView openNewSession() {
     return openNewSession(null);
-  }
-
-  public static ChatView openConversation(ConversationXmlData conversation) {
-    ChatServiceManager manager = CopilotUi.getPlugin().getChatServiceManager();
-    CopilotSessionRegistry registry = manager.getSessionRegistry();
-    CopilotSession existing = registry.findByConversation(conversation.getConversationId());
-    if (existing != null && existing.getView() != null) {
-      activate(existing.getView());
-      return existing.getView();
-    }
-    return openNewSession(conversation);
-  }
-
-  public static void focus(ChatView view) {
-    activate(view);
   }
 
   private static ChatView openNewSession(ConversationXmlData conversation) {
@@ -69,6 +55,23 @@ public final class SessionViewOpener {
       CopilotCore.LOGGER.error("Failed to open Copilot session", e);
       return null;
     }
+  }
+
+  /** Focus an open conversation or restore it in a new chat view. */
+  public static ChatView openConversation(ConversationXmlData conversation) {
+    ChatServiceManager manager = CopilotUi.getPlugin().getChatServiceManager();
+    CopilotSessionRegistry registry = manager.getSessionRegistry();
+    CopilotSession existing = registry.findByConversation(conversation.getConversationId());
+    if (existing != null && existing.getView() != null) {
+      activate(existing.getView());
+      return existing.getView();
+    }
+    return openNewSession(conversation);
+  }
+
+  /** Focus an open chat view. */
+  public static void focus(ChatView view) {
+    activate(view);
   }
 
   private static void activate(ChatView view) {

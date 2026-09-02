@@ -73,6 +73,9 @@ public class ChatHistoryViewer extends Composite {
     this(parent, style, conversations, currentConversationId, "");
   }
 
+  /**
+   * Create a history viewer scoped to one chat session.
+   */
   public ChatHistoryViewer(Composite parent, int style, List<ConversationXmlData> conversations,
       String currentConversationId, String sessionId) {
     super(parent, style);

@@ -84,6 +84,9 @@ public class ChatContentViewer extends ScrolledComposite {
     this(parent, style, serviceManager, "");
   }
 
+  /**
+   * Create a chat content viewer scoped to one session.
+   */
   public ChatContentViewer(Composite parent, int style, ChatServiceManager serviceManager, String sessionId) {
     super(parent, style | SWT.V_SCROLL);
     this.sessionId = sessionId;

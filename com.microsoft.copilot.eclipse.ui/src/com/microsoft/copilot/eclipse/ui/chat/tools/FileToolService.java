@@ -23,8 +23,8 @@ import com.microsoft.copilot.eclipse.core.CopilotCore;
 import com.microsoft.copilot.eclipse.core.events.CopilotEventConstants;
 import com.microsoft.copilot.eclipse.core.lsp.CopilotLanguageServerConnection;
 import com.microsoft.copilot.eclipse.ui.CopilotUi;
-import com.microsoft.copilot.eclipse.ui.chat.ChatView;
 import com.microsoft.copilot.eclipse.ui.chat.ChatSessionEvent;
+import com.microsoft.copilot.eclipse.ui.chat.ChatView;
 import com.microsoft.copilot.eclipse.ui.chat.WorkingSetBar;
 import com.microsoft.copilot.eclipse.ui.chat.services.ChatBaseService;
 import com.microsoft.copilot.eclipse.ui.chat.services.CopilotSession;
@@ -91,11 +91,11 @@ public class FileToolService extends ChatBaseService {
           });
       state.buttonEnableSideEffect = ISideEffect.create(() -> state.buttonEnableObservable.getValue(),
           (Boolean status) -> {
-        if (state.workingSetBar == null || state.workingSetBar.isDisposed()) {
-          return;
-        }
-        state.workingSetBar.setButtonStatus(status);
-      });
+            if (state.workingSetBar == null || state.workingSetBar.isDisposed()) {
+              return;
+            }
+            state.workingSetBar.setButtonStatus(status);
+          });
     });
   }
 
@@ -108,6 +108,7 @@ public class FileToolService extends ChatBaseService {
     }
   }
 
+  /** Unbind one session's changed-files bar. */
   public void unbindWorkingSetBar(ChatView chatView) {
     SessionFileState state = chatView != null ? sessionStates.remove(chatView.getSessionId()) : null;
     if (state == null) {
@@ -360,6 +361,7 @@ public class FileToolService extends ChatBaseService {
     }
   }
 
+  /** Dispose one session's changed-files bar. */
   public void disposeWorkingSetBar(String sessionId) {
     SessionFileState state = sessionStates.get(sessionId);
     if (state != null) {
@@ -376,10 +378,12 @@ public class FileToolService extends ChatBaseService {
     }
   }
 
+  /** Route synchronous file tool updates to a session. */
   public void enterInvocationSession(String sessionId) {
     invocationSession.set(sessionId);
   }
 
+  /** Clear the current file tool routing context. */
   public void exitInvocationSession() {
     invocationSession.remove();
   }

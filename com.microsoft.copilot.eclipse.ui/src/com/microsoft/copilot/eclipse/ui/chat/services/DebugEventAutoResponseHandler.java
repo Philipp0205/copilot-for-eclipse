@@ -21,10 +21,10 @@ import org.eclipse.swt.widgets.Display;
 import com.microsoft.copilot.eclipse.core.CopilotCore;
 import com.microsoft.copilot.eclipse.core.chat.ChatProgressListener;
 import com.microsoft.copilot.eclipse.core.lsp.protocol.ChatProgressValue;
+import com.microsoft.copilot.eclipse.ui.CopilotUi;
 import com.microsoft.copilot.eclipse.ui.chat.ActionBar;
 import com.microsoft.copilot.eclipse.ui.chat.ChatView;
 import com.microsoft.copilot.eclipse.ui.chat.tools.JavaDebuggerToolAdapter;
-import com.microsoft.copilot.eclipse.ui.CopilotUi;
 
 /**
  * Handles debug events and automatically sends chat messages when breakpoints are hit

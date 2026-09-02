@@ -23,6 +23,7 @@ public final class CopilotSessionRegistry {
   private final CopyOnWriteArraySet<Runnable> listeners = new CopyOnWriteArraySet<>();
   private volatile String activeSessionId;
 
+  /** Register an open view. */
   public CopilotSession registerView(String sessionId, ChatView view) {
     CopilotSession session = getOrCreate(sessionId);
     session.setView(view);
@@ -30,10 +31,12 @@ public final class CopilotSessionRegistry {
     return session;
   }
 
+  /** Find or create runtime session metadata. */
   public CopilotSession getOrCreate(String sessionId) {
     return sessions.computeIfAbsent(sessionId, CopilotSession::new);
   }
 
+  /** Unregister a closed view. */
   public void unregisterView(String sessionId, ChatView view) {
     CopilotSession session = sessions.get(sessionId);
     if (session != null && session.getView() == view) {
@@ -46,36 +49,43 @@ public final class CopilotSessionRegistry {
     }
   }
 
+  /** Mark a session as the most recently active session. */
   public void setActive(String sessionId) {
     activeSessionId = sessionId;
     fireChanged();
   }
 
+  /** Return the most recently active session. */
   public CopilotSession getActive() {
     return sessions.get(activeSessionId);
   }
 
+  /** Return the most recently active chat view. */
   public ChatView getActiveView() {
     CopilotSession active = getActive();
     return active != null ? active.getView() : null;
   }
 
+  /** Update conversation aliases for a session. */
   public void updateConversation(String sessionId, String conversationId,
       String subagentConversationId) {
     getOrCreate(sessionId).setConversationIds(conversationId, subagentConversationId);
     fireChanged();
   }
 
+  /** Update the title shown in the overview. */
   public void updateTitle(String sessionId, String title) {
     getOrCreate(sessionId).setTitle(title);
     fireChanged();
   }
 
+  /** Update live execution status. */
   public void updateStatus(String sessionId, Status status) {
     getOrCreate(sessionId).setStatus(status);
     fireChanged();
   }
 
+  /** Find an open session by main or subagent conversation id. */
   public CopilotSession findByConversation(String conversationId) {
     if (StringUtils.isBlank(conversationId)) {
       return null;
@@ -87,6 +97,7 @@ public final class CopilotSessionRegistry {
         .orElse(null);
   }
 
+  /** Return open sessions, newest first. */
   public List<CopilotSession> getOpenSessions() {
     List<CopilotSession> result = new ArrayList<>();
     sessions.values().stream()
@@ -96,12 +107,14 @@ public final class CopilotSessionRegistry {
     return result;
   }
 
+  /** Subscribe to registry changes. */
   public void addListener(Runnable listener) {
     if (listener != null) {
       listeners.add(listener);
     }
   }
 
+  /** Unsubscribe from registry changes. */
   public void removeListener(Runnable listener) {
     listeners.remove(listener);
   }

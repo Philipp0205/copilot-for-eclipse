@@ -4,8 +4,8 @@
 package com.microsoft.copilot.eclipse.ui.chat.services;
 
 import java.util.ArrayList;
-import java.util.Map;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.eclipse.core.databinding.observable.sideeffect.ISideEffect;
@@ -84,6 +84,7 @@ public class TodoListService extends ChatBaseService implements ChatProgressList
     }
   }
 
+  /** Unbind one session's todo list bar. */
   public void unbindTodoListBar(ChatView chatView) {
     if (chatView == null) {
       return;
@@ -112,6 +113,7 @@ public class TodoListService extends ChatBaseService implements ChatProgressList
     }
   }
 
+  /** Set todo items for a particular session. */
   public void setTodoList(String sessionId, List<TodoItem> todoList) {
     SessionTodoState state = sessionStates.get(sessionId);
     if (state == null) {
@@ -130,6 +132,7 @@ public class TodoListService extends ChatBaseService implements ChatProgressList
     return active != null ? getTodoList(active.getSessionId()) : new ArrayList<>();
   }
 
+  /** Get todo items for a particular session. */
   public List<TodoItem> getTodoList(String sessionId) {
     List<TodoItem> result = new ArrayList<>();
     SessionTodoState state = sessionStates.get(sessionId);
@@ -145,12 +148,14 @@ public class TodoListService extends ChatBaseService implements ChatProgressList
     return result;
   }
 
+  /** Return the active session's todo list bar. */
   public TodoListBar getTodoListBar() {
     CopilotSession active = CopilotUi.getPlugin().getChatServiceManager().getSessionRegistry().getActive();
     SessionTodoState state = active != null ? sessionStates.get(active.getSessionId()) : null;
     return state != null ? state.todoListBar : null;
   }
 
+  /** Return the active chat view. */
   public ChatView getChatView() {
     CopilotSession active = CopilotUi.getPlugin().getChatServiceManager().getSessionRegistry().getActive();
     return active != null ? active.getView() : null;
@@ -182,6 +187,7 @@ public class TodoListService extends ChatBaseService implements ChatProgressList
     }
   }
 
+  /** Return whether the active session has a request in progress. */
   public boolean isRequestInProgress() {
     CopilotSession active = CopilotUi.getPlugin().getChatServiceManager().getSessionRegistry().getActive();
     SessionTodoState state = active != null ? sessionStates.get(active.getSessionId()) : null;

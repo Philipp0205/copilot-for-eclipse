@@ -47,6 +47,9 @@ public class TopBanner extends Composite {
     this(parent, style, "");
   }
 
+  /**
+   * Create a top banner scoped to one chat session.
+   */
   public TopBanner(Composite parent, int style, String sessionId) {
     super(parent, style);
     this.sessionId = sessionId;

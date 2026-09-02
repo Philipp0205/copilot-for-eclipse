@@ -17,6 +17,7 @@ import com.microsoft.copilot.eclipse.ui.chat.ChatView;
  * after the first turn begins.</p>
  */
 public final class CopilotSession {
+  /** Runtime state displayed in the sessions overview. */
   public enum Status {
     IDLE("Idle"),
     RUNNING("Running"),
