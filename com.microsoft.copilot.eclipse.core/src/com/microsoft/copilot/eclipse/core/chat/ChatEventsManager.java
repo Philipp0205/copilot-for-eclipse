@@ -81,12 +81,18 @@ public class ChatEventsManager {
     }
   }
 
+  /**
+   * Register the owner of a work-done token.
+   */
   public void registerProgressRoute(String workDoneToken, ChatProgressListener listener) {
     if (workDoneToken != null && listener != null) {
       progressRoutes.put(workDoneToken, listener);
     }
   }
 
+  /**
+   * Remove every token and conversation route owned by a listener.
+   */
   public void unregisterProgressRoutes(ChatProgressListener listener) {
     progressRoutes.entrySet().removeIf(entry -> entry.getValue() == listener);
     conversationRoutes.entrySet().removeIf(entry -> entry.getValue() == listener);
