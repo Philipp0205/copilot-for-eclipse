@@ -46,6 +46,7 @@ import com.microsoft.copilot.eclipse.ui.chat.confirmation.ConfirmationService;
 import com.microsoft.copilot.eclipse.ui.chat.tools.BaseTool;
 import com.microsoft.copilot.eclipse.ui.chat.tools.CreateFileTool;
 import com.microsoft.copilot.eclipse.ui.chat.tools.EditFileTool;
+import com.microsoft.copilot.eclipse.ui.chat.tools.FileToolService;
 import com.microsoft.copilot.eclipse.ui.chat.tools.GetErrorsTool;
 import com.microsoft.copilot.eclipse.ui.chat.tools.JavaDebuggerToolAdapter;
 import com.microsoft.copilot.eclipse.ui.chat.tools.RunInTerminalToolAdapter;
