@@ -485,7 +485,7 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
         }
         this.chatContentViewer.hideCompactingStatusOnLatestCopilotTurn();
         if (params.contextInfo() != null) {
-          this.chatServiceManager.getContextWindowService().updateContextSize(params.contextInfo());
+          this.chatServiceManager.getContextWindowService().updateContextSize(sessionId, params.contextInfo());
         }
       }, parent);
     };
@@ -980,7 +980,7 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
         // Update context size donut if data is available
         ContextSizeInfo contextSize = value.getContextSize();
         if (contextSize != null) {
-          this.chatServiceManager.getContextWindowService().updateContextSize(contextSize);
+          this.chatServiceManager.getContextWindowService().updateContextSize(sessionId, contextSize);
         }
 
         if (value.getSteps() != null) {
@@ -1154,7 +1154,7 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
     fileService.cleanupNonExistentFiles();
 
     IFile currentFile = fileService.getCurrentFile();
-    List<IResource> references = fileService.getReferencedFiles();
+    List<IResource> references = fileService.getReferencedFiles(sessionId);
     Range currentSelection = fileService.getCurrentSelection();
 
     final CopilotLanguageServerConnection ls = CopilotCore.getPlugin().getCopilotLanguageServer();
@@ -1487,8 +1487,8 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
       return;
     }
 
-    this.chatServiceManager.getContextWindowService().clearContextSize();
-    this.chatServiceManager.getReferencedFileService().updateReferencedFiles(List.of());
+    this.chatServiceManager.getContextWindowService().clearContextSize(sessionId);
+    this.chatServiceManager.getReferencedFileService().updateReferencedFiles(sessionId, List.of());
     SwtUtils.invokeOnDisplayThreadAsync(
         () -> this.chatServiceManager.getFileToolService().disposeWorkingSetBar(sessionId));
 

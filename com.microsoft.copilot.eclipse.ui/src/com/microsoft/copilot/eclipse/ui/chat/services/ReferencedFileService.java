@@ -6,6 +6,7 @@ package com.microsoft.copilot.eclipse.ui.chat.services;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.eclipse.core.databinding.observable.sideeffect.ISideEffect;
@@ -39,6 +40,7 @@ import com.microsoft.copilot.eclipse.core.Constants;
 import com.microsoft.copilot.eclipse.core.CopilotCore;
 import com.microsoft.copilot.eclipse.core.chat.service.IReferencedFileService;
 import com.microsoft.copilot.eclipse.core.utils.FileUtils;
+import com.microsoft.copilot.eclipse.ui.CopilotUi;
 import com.microsoft.copilot.eclipse.ui.chat.ActionBar;
 import com.microsoft.copilot.eclipse.ui.chat.CurrentReferencedFile;
 import com.microsoft.copilot.eclipse.ui.utils.UiUtils;
@@ -55,12 +57,11 @@ public class ReferencedFileService extends ChatBaseService implements IReference
   // The reason that we use map to dedup the context file is that the hashCode() method
   // of the IFile/IFolder checks the full path, which will fail to dedup when it comes to multi-module
   // project, so we use the URI instead.
-  private IObservableValue<Map<String, IResource>> referencedFilesObservable;
+  private final Map<String, IObservableValue<Map<String, IResource>>> referencedFilesObservables =
+      new ConcurrentHashMap<>();
 
-  private ISideEffect currentReferencedFileSideEffect;
-  private ISideEffect isCurrentFileVisibleSideEffect;
-  private ISideEffect referencedFilesSideEffect;
-  private ISideEffect currentSelectionSideEffect;
+  private final Map<CurrentReferencedFile, ISideEffect[]> currentFileSideEffects = new ConcurrentHashMap<>();
+  private final Map<ActionBar, ISideEffect> referencedFilesSideEffects = new ConcurrentHashMap<>();
 
   private IPartListener2 listener;
   private ISelectionChangedListener selectionListener;
@@ -75,7 +76,7 @@ public class ReferencedFileService extends ChatBaseService implements IReference
       currentFileObservable = new WritableValue<>(null, IFile.class);
       isCurrentFileVisibleObservable = new WritableValue<>(true, Boolean.class);
       currentSelectionObservable = new WritableValue<>(null, Range.class);
-      referencedFilesObservable = new WritableValue<>(new LinkedHashMap<>(), Map.class);
+      referencedFilesObservables.put("", new WritableValue<>(new LinkedHashMap<>(), Map.class));
     });
     this.selectionListener = new ISelectionChangedListener() {
       @Override
@@ -130,9 +131,14 @@ public class ReferencedFileService extends ChatBaseService implements IReference
 
   @Override
   public List<IResource> getReferencedFiles() {
+    return getReferencedFiles(activeSessionId());
+  }
+
+  /** Return referenced resources for one session. */
+  public List<IResource> getReferencedFiles(String sessionId) {
     final AtomicReference<List<IResource>> result = new AtomicReference<>();
     ensureRealm(() -> {
-      Map<String, IResource> files = referencedFilesObservable.getValue();
+      Map<String, IResource> files = referencedFilesObservable(sessionId).getValue();
       result.set(List.copyOf(files.values()));
     });
     return result.get();
@@ -210,31 +216,32 @@ public class ReferencedFileService extends ChatBaseService implements IReference
    * Binds the current file widget to the current file observable.
    */
   public void bindCurrentFileWidget(CurrentReferencedFile widget) {
-    unbindCurrentFileWidget();
+    unbindCurrentFileWidget(widget);
 
     ensureRealm(() -> {
-      currentReferencedFileSideEffect = ISideEffect.create(currentFileObservable::getValue, (IFile file) -> {
+      ISideEffect fileEffect = ISideEffect.create(currentFileObservable::getValue, (IFile file) -> {
         if (widget.isDisposed()) {
           return;
         }
         widget.setFile(file);
         widget.updateCloseClickBtnIcon(isCurrentFileVisibleObservable.getValue());
       });
-      isCurrentFileVisibleSideEffect = ISideEffect.create(isCurrentFileVisibleObservable::getValue,
+      ISideEffect visibilityEffect = ISideEffect.create(isCurrentFileVisibleObservable::getValue,
           (Boolean isVisible) -> {
             if (widget.isDisposed()) {
               return;
             }
             widget.updateCloseClickBtnIcon(isVisible);
           });
-      currentSelectionSideEffect = ISideEffect.create(currentSelectionObservable::getValue, (Range selection) -> {
+      ISideEffect selectionEffect = ISideEffect.create(currentSelectionObservable::getValue, (Range selection) -> {
         if (widget.isDisposed()) {
           return;
         }
         widget.setSelection(selection);
       });
 
-      widget.addDisposeListener(e -> unbindCurrentFileWidget());
+      currentFileSideEffects.put(widget, new ISideEffect[] { fileEffect, visibilityEffect, selectionEffect });
+      widget.addDisposeListener(e -> unbindCurrentFileWidget(widget));
     });
 
     updateCurrentReferencedFile(UiUtils.getActiveEditor());
@@ -256,18 +263,25 @@ public class ReferencedFileService extends ChatBaseService implements IReference
    */
   public void bindReferencedFilesWidget(ActionBar actionBar) {
     ensureRealm(() -> {
-      if (referencedFilesSideEffect != null) {
-        referencedFilesSideEffect.dispose();
-        referencedFilesSideEffect = null;
+      ISideEffect previous = referencedFilesSideEffects.remove(actionBar);
+      if (previous != null) {
+        previous.dispose();
       }
-
-      referencedFilesSideEffect = ISideEffect.create(referencedFilesObservable::getValue,
+      IObservableValue<Map<String, IResource>> observable = referencedFilesObservable(actionBar.getSessionId());
+      ISideEffect sideEffect = ISideEffect.create(observable::getValue,
           (Map<String, IResource> files) -> {
             if (actionBar.isDisposed()) {
               return;
             }
             actionBar.updateReferencedWidgetsWithFiles(List.copyOf(files.values()));
           });
+      referencedFilesSideEffects.put(actionBar, sideEffect);
+      actionBar.addDisposeListener(event -> {
+        ISideEffect effect = referencedFilesSideEffects.remove(actionBar);
+        if (effect != null) {
+          effect.dispose();
+        }
+      });
     });
   }
 
@@ -382,10 +396,15 @@ public class ReferencedFileService extends ChatBaseService implements IReference
    * Update the referenced files observable with a new set of files.
    */
   public void updateReferencedFiles(List<IResource> files) {
+    updateReferencedFiles(activeSessionId(), files);
+  }
+
+  /** Replace referenced resources for one session. */
+  public void updateReferencedFiles(String sessionId, List<IResource> files) {
     ensureRealm(() -> {
       Map<String, IResource> fileMap = new LinkedHashMap<>();
       addFilesToMap(files, fileMap);
-      referencedFilesObservable.setValue(fileMap);
+      referencedFilesObservable(sessionId).setValue(fileMap);
     });
   }
 
@@ -394,9 +413,10 @@ public class ReferencedFileService extends ChatBaseService implements IReference
    */
   public void addReferencedFiles(List<IResource> files) {
     ensureRealm(() -> {
-      Map<String, IResource> fileMap = new LinkedHashMap<>(referencedFilesObservable.getValue());
+      IObservableValue<Map<String, IResource>> observable = referencedFilesObservable(activeSessionId());
+      Map<String, IResource> fileMap = new LinkedHashMap<>(observable.getValue());
       addFilesToMap(files, fileMap);
-      referencedFilesObservable.setValue(fileMap);
+      observable.setValue(fileMap);
     });
   }
 
@@ -430,12 +450,13 @@ public class ReferencedFileService extends ChatBaseService implements IReference
         return;
       }
 
-      Map<String, IResource> fileMap = new LinkedHashMap<>(referencedFilesObservable.getValue());
+      IObservableValue<Map<String, IResource>> observable = referencedFilesObservable(activeSessionId());
+      Map<String, IResource> fileMap = new LinkedHashMap<>(observable.getValue());
       String uri = FileUtils.getResourceUri(targetResource);
       boolean hasChanges = fileMap.remove(uri) != null
           || fileMap.values().removeIf(resource -> resource == targetResource);
       if (hasChanges) {
-        referencedFilesObservable.setValue(fileMap);
+        observable.setValue(fileMap);
       }
     });
   }
@@ -445,29 +466,22 @@ public class ReferencedFileService extends ChatBaseService implements IReference
    */
   public void cleanupNonExistentFiles() {
     ensureRealm(() -> {
-      Map<String, IResource> fileMap = new LinkedHashMap<>(referencedFilesObservable.getValue());
+      IObservableValue<Map<String, IResource>> observable = referencedFilesObservable(activeSessionId());
+      Map<String, IResource> fileMap = new LinkedHashMap<>(observable.getValue());
       boolean hasChanges = fileMap.values().removeIf(resource -> resource == null || !resource.exists());
       if (hasChanges) {
-        referencedFilesObservable.setValue(fileMap);
+        observable.setValue(fileMap);
       }
     });
   }
 
-  private void unbindCurrentFileWidget() {
+  private void unbindCurrentFileWidget(CurrentReferencedFile widget) {
     ensureRealm(() -> {
-      if (currentReferencedFileSideEffect != null) {
-        currentReferencedFileSideEffect.dispose();
-        currentReferencedFileSideEffect = null;
-      }
-
-      if (isCurrentFileVisibleSideEffect != null) {
-        isCurrentFileVisibleSideEffect.dispose();
-        isCurrentFileVisibleSideEffect = null;
-      }
-
-      if (currentSelectionSideEffect != null) {
-        currentSelectionSideEffect.dispose();
-        currentSelectionSideEffect = null;
+      ISideEffect[] effects = currentFileSideEffects.remove(widget);
+      if (effects != null) {
+        for (ISideEffect effect : effects) {
+          effect.dispose();
+        }
       }
     });
   }
@@ -513,6 +527,27 @@ public class ReferencedFileService extends ChatBaseService implements IReference
    */
   public void dispose() {
     unregisterPartListener();
+    currentFileSideEffects.values().forEach(effects -> {
+      for (ISideEffect effect : effects) {
+        effect.dispose();
+      }
+    });
+    referencedFilesSideEffects.values().forEach(ISideEffect::dispose);
+    currentFileSideEffects.clear();
+    referencedFilesSideEffects.clear();
+    referencedFilesObservables.clear();
+  }
+
+  private IObservableValue<Map<String, IResource>> referencedFilesObservable(String sessionId) {
+    String key = sessionId != null ? sessionId : "";
+    return referencedFilesObservables.computeIfAbsent(key,
+        ignored -> new WritableValue<>(new LinkedHashMap<>(), Map.class));
+  }
+
+  private String activeSessionId() {
+    ChatServiceManager manager = CopilotUi.getPlugin().getChatServiceManager();
+    CopilotSession session = manager != null ? manager.getSessionRegistry().getActive() : null;
+    return session != null ? session.getSessionId() : "";
   }
 
   private void registerPartListener() {

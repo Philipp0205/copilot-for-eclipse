@@ -8,6 +8,8 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.eclipse.lsp4j.WorkDoneProgressKind;
+
 import com.microsoft.copilot.eclipse.core.lsp.protocol.ChatProgressValue;
 import com.microsoft.copilot.eclipse.core.lsp.protocol.InvokeClientToolConfirmationParams;
 import com.microsoft.copilot.eclipse.core.lsp.protocol.InvokeClientToolParams;
@@ -72,6 +74,9 @@ public class ChatEventsManager {
       routed.onChatProgress(message);
       if (message != null && message.getConversationId() != null) {
         conversationRoutes.put(message.getConversationId(), routed);
+      }
+      if (message != null && message.getKind() == WorkDoneProgressKind.end && workDoneToken != null) {
+        progressRoutes.remove(workDoneToken, routed);
       }
     }
     for (ChatProgressListener listener : this.chatProgressListeners) {

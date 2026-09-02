@@ -23,6 +23,7 @@ import com.microsoft.copilot.eclipse.ui.swt.ContextWindowBar;
 class ContextWindowPopup extends BaseHoverPopup {
 
   private final ContextWindowService contextWindowService;
+  private final String sessionId;
 
   private Label tokenUsageLabel;
   private Label percentageLabel;
@@ -35,10 +36,11 @@ class ContextWindowPopup extends BaseHoverPopup {
 
   private ContextSizeInfo latestInfo;
 
-  ContextWindowPopup(ContextWindowService service) {
+  ContextWindowPopup(ContextWindowService service, String sessionId) {
     super();
     this.contextWindowService = service;
-    this.contextWindowService.bindContextWindowPopup(this);
+    this.sessionId = sessionId;
+    this.contextWindowService.bindContextWindowPopup(this, sessionId);
   }
 
   public void open(Control anchor) {
@@ -46,7 +48,7 @@ class ContextWindowPopup extends BaseHoverPopup {
     if (isOpen()) {
       return;
     }
-    ContextSizeInfo info = contextWindowService.getState();
+    ContextSizeInfo info = contextWindowService.getState(sessionId);
     if (info == null) {
       return;
     }

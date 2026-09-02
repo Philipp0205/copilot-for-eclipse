@@ -364,6 +364,11 @@ public class ActionBar extends Composite implements NewConversationListener {
     });
   }
 
+  /** Return the stable id of this action bar's chat session. */
+  public String getSessionId() {
+    return sessionId;
+  }
+
   /**
    * Update the referenced file widgets when supportVision changes.
    *
@@ -591,7 +596,7 @@ public class ActionBar extends Composite implements NewConversationListener {
   }
 
   private void setUpContextSizeDonutInControlBar(Composite parent) {
-    this.contextSizeDonut = new ContextSizeDonut(parent, chatServiceManager.getContextWindowService());
+    this.contextSizeDonut = new ContextSizeDonut(parent, chatServiceManager.getContextWindowService(), sessionId);
   }
 
   private void setUpAutoBreakpointButtonInControlBar(Composite parent) {
