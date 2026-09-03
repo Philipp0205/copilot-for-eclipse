@@ -44,6 +44,14 @@ To use GitHub Copilot, an active subscription is required. Learn more about busi
 3. Select **GitHub Copilot** and complete installation.
 4. Restart Eclipse and sign in.
 
+## Copilot Extensions (optional companion plugin)
+
+Extra MCP integrations are shipped as a **separate installable feature** (`Copilot Extensions`) so they do not have to be merged into the official GitHub Copilot plugin.
+
+- Install **Copilot Extensions** from this repository's update site after GitHub Copilot is installed.
+- Configure extra servers and workspace discovery under **Window → Preferences → GitHub Copilot → Extensions**.
+- Details: [docs/copilot-extensions.md](docs/copilot-extensions.md).
+
 ## Core capabilities
 
 ### Code completions

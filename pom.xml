@@ -27,6 +27,9 @@
 		<module>com.microsoft.copilot.eclipse.ui</module>
 		<module>com.microsoft.copilot.eclipse.ui.jobs</module>
 
+		<!-- companion plugin; not part of the official GitHub Copilot feature -->
+		<module>copilot.eclipse.extensions</module>
+
 		<!-- branding -->
 		<module>com.microsoft.copilot.eclipse.branding</module>
 
@@ -39,12 +42,14 @@
 
 		<!-- features and update site -->
 		<module>com.microsoft.copilot.eclipse.feature</module>
+		<module>copilot.eclipse.extensions.feature</module>
 		<module>com.microsoft.copilot.eclipse.repository</module>
 
 		<!-- modules for tests -->
 		<module>com.microsoft.copilot.eclipse.core.test</module>
 		<module>com.microsoft.copilot.eclipse.ui.test</module>
 		<module>com.microsoft.copilot.eclipse.swtbot.test</module>
+		<module>copilot.eclipse.extensions.test</module>
 	</modules>
 
 	<build>
