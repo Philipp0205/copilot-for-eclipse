@@ -35,6 +35,7 @@ public class TopBanner extends Composite {
   private LinkedHashSet<NewConversationListener> newConversationListeners = new LinkedHashSet<>();
   private IEventBroker eventBroker;
   private EventHandler newConversationEventHandler;
+  private final String sessionId;
 
   /**
    * Create the widget.
@@ -43,12 +44,21 @@ public class TopBanner extends Composite {
    * @param style the style
    */
   public TopBanner(Composite parent, int style) {
+    this(parent, style, "");
+  }
+
+  /**
+   * Create a top banner scoped to one chat session.
+   */
+  public TopBanner(Composite parent, int style, String sessionId) {
     super(parent, style);
+    this.sessionId = sessionId;
     this.eventBroker = PlatformUI.getWorkbench().getService(IEventBroker.class);
     this.newConversationEventHandler = new EventHandler() {
       @Override
       public void handleEvent(Event event) {
-        if (ConversationUtils.confirmEndChat()) {
+        if (ChatSessionEvent.isForSession(event, TopBanner.this.sessionId)
+            && ConversationUtils.confirmEndChat()) {
           notifyNewConversationListeners();
           updateTitle(Messages.chat_topBanner_defaultChatTitle);
         }
@@ -155,7 +165,8 @@ public class TopBanner extends Composite {
       listener.onNewConversation();
     }
     IEventBroker eventBroker = PlatformUI.getWorkbench().getService(IEventBroker.class);
-    eventBroker.post(CopilotEventConstants.TOPIC_CHAT_NEW_CONVERSATION, null);
+    eventBroker.post(CopilotEventConstants.TOPIC_CHAT_NEW_CONVERSATION,
+        ChatSessionEvent.forSession(sessionId));
   }
 
   /**

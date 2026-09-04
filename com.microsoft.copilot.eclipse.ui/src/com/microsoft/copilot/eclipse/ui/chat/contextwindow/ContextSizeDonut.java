@@ -33,13 +33,22 @@ public class ContextSizeDonut {
   private final Canvas canvas;
   private final ContextWindowPopup popup;
   private final ContextWindowService contextWindowService;
+  private final String sessionId;
 
   /**
    * Creates the donut canvas as a child of {@code parent} and wires it to the given service.
    */
   public ContextSizeDonut(Composite parent, ContextWindowService contextWindowService) {
+    this(parent, contextWindowService, "");
+  }
+
+  /**
+   * Creates a context donut for one chat session.
+   */
+  public ContextSizeDonut(Composite parent, ContextWindowService contextWindowService, String sessionId) {
     this.contextWindowService = contextWindowService;
-    this.popup = new ContextWindowPopup(contextWindowService);
+    this.sessionId = sessionId;
+    this.popup = new ContextWindowPopup(contextWindowService, sessionId);
     parent.addDisposeListener(e -> popup.dispose());
     canvas = new Canvas(parent, SWT.NONE);
     GridData gd = new GridData(SWT.LEFT, SWT.CENTER, false, false);
@@ -48,7 +57,7 @@ public class ContextSizeDonut {
     canvas.setLayoutData(gd);
 
     canvas.addPaintListener(e -> {
-      ContextSizeInfo info = contextWindowService.getState();
+      ContextSizeInfo info = contextWindowService.getState(sessionId);
       if (info == null) {
         return;
       }
@@ -92,7 +101,7 @@ public class ContextSizeDonut {
 
     AccessibilityUtils.addFocusBorderToComposite(canvas);
     AccessibilityUtils.addAccessibilityNameForUiComponent(canvas, Messages.context_window_title);
-    contextWindowService.bindContextSizeDonut(canvas);
+    contextWindowService.bindContextSizeDonut(canvas, sessionId);
     canvas.requestLayout();
   }
 }

@@ -59,6 +59,7 @@ public class ChatContentViewer extends ScrolledComposite {
       Pattern.compile("\\s*\\|?\\s*(?:GitHub\\s+)?Request\\s+ID:\\s*\\S+\\.?", Pattern.CASE_INSENSITIVE);
 
   private ChatServiceManager serviceManager;
+  private final String sessionId;
   private String conversationId;
 
   private Composite cmpContent;
@@ -80,7 +81,15 @@ public class ChatContentViewer extends ScrolledComposite {
    * @param style the style
    */
   public ChatContentViewer(Composite parent, int style, ChatServiceManager serviceManager) {
+    this(parent, style, serviceManager, "");
+  }
+
+  /**
+   * Create a chat content viewer scoped to one session.
+   */
+  public ChatContentViewer(Composite parent, int style, ChatServiceManager serviceManager, String sessionId) {
     super(parent, style | SWT.V_SCROLL);
+    this.sessionId = sessionId;
     this.setExpandHorizontal(true);
     this.setExpandVertical(true);
     this.setLayout(new GridLayout(1, true));
@@ -297,7 +306,8 @@ public class ChatContentViewer extends ScrolledComposite {
           String previousInput = this.serviceManager.getUserPreferenceService().getPreviousInput(StringUtils.EMPTY);
           if (StringUtils.isNotEmpty(previousInput)) {
             IEventBroker eventBroker = PlatformUI.getWorkbench().getService(IEventBroker.class);
-            Map<String, Object> properties = Map.of("previousInput", previousInput, "needCreateUserTurn", false);
+            Map<String, Object> properties = Map.of("previousInput", previousInput, "needCreateUserTurn", false,
+                ChatSessionEvent.SESSION_ID, sessionId);
             eventBroker.post(CopilotEventConstants.TOPIC_CHAT_ON_SEND, properties);
           }
         }
@@ -377,7 +387,7 @@ public class ChatContentViewer extends ScrolledComposite {
 
     List<TodoItem> todos = toolSpecificData.getTodoList();
     if (todos != null) {
-      todoListService.setTodoList(new ArrayList<>(todos));
+      todoListService.setTodoList(sessionId, new ArrayList<>(todos));
     }
   }
 

@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## 0.19.0
 ### Added
+- Support running multiple Copilot chat sessions in parallel, with a Copilot Sessions view for live status and history.
 - Improve terminal command execution across Windows and Linux. [PR#247](https://github.com/microsoft/copilot-for-eclipse/pull/247)
 - Support editing/creating local files outside the workspace. [PR#248](https://github.com/microsoft/copilot-for-eclipse/pull/248)
 - Support automatic chat context compression. [PR#250](https://github.com/microsoft/copilot-for-eclipse/pull/250)

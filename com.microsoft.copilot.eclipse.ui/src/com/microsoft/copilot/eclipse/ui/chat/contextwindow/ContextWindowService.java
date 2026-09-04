@@ -25,7 +25,7 @@ import com.microsoft.copilot.eclipse.ui.utils.SwtUtils;
  */
 public class ContextWindowService {
 
-  private IObservableValue<ContextSizeInfo> contextSizeObservable;
+  private final Map<String, IObservableValue<ContextSizeInfo>> contextSizeObservables = new HashMap<>();
   private final Map<ContextWindowPopup, ISideEffect> popupSideEffects = new HashMap<>();
 
   /**
@@ -40,7 +40,7 @@ public class ContextWindowService {
       }
       Realm.runWithDefault(realm, () -> observableRef.set(new WritableValue<>(null, ContextSizeInfo.class)));
     });
-    contextSizeObservable = observableRef.get();
+    contextSizeObservables.put("", observableRef.get());
   }
 
   /**
@@ -49,6 +49,12 @@ public class ContextWindowService {
    * @return the current state, or {@code null} if no state has been recorded
    */
   public ContextSizeInfo getState() {
+    return getState("");
+  }
+
+  /** Returns context state for one session. */
+  public ContextSizeInfo getState(String sessionId) {
+    IObservableValue<ContextSizeInfo> contextSizeObservable = getObservable(sessionId);
     if (contextSizeObservable == null) {
       return null;
     }
@@ -64,6 +70,12 @@ public class ContextWindowService {
    * @param contextSizeInfo the new context size state, or {@code null} to clear it
    */
   public void updateContextSize(ContextSizeInfo contextSizeInfo) {
+    updateContextSize("", contextSizeInfo);
+  }
+
+  /** Updates context state for one session. */
+  public void updateContextSize(String sessionId, ContextSizeInfo contextSizeInfo) {
+    IObservableValue<ContextSizeInfo> contextSizeObservable = getObservable(sessionId);
     if (contextSizeObservable != null) {
       contextSizeObservable.getRealm().asyncExec(() -> contextSizeObservable.setValue(contextSizeInfo));
     }
@@ -76,16 +88,27 @@ public class ContextWindowService {
     updateContextSize(null);
   }
 
+  /** Clears context state for one session. */
+  public void clearContextSize(String sessionId) {
+    updateContextSize(sessionId, null);
+  }
+
   /**
    * Binds the context size donut canvas to the current observable state.
    *
    * @param canvas the donut canvas
    */
   public void bindContextSizeDonut(Canvas canvas) {
+    bindContextSizeDonut(canvas, "");
+  }
+
+  /** Binds a donut to one session's context state. */
+  public void bindContextSizeDonut(Canvas canvas, String sessionId) {
     if (canvas == null) {
       return;
     }
 
+    IObservableValue<ContextSizeInfo> contextSizeObservable = getObservable(sessionId);
     contextSizeObservable.getRealm().exec(() -> {
       ISideEffect sideEffect = ISideEffect.create(contextSizeObservable::getValue, (ContextSizeInfo info) -> {
         boolean hasData = info != null;
@@ -105,7 +128,8 @@ public class ContextWindowService {
    *
    * @param popup the popup to update
    */
-  void bindContextWindowPopup(ContextWindowPopup popup) {
+  void bindContextWindowPopup(ContextWindowPopup popup, String sessionId) {
+    IObservableValue<ContextSizeInfo> contextSizeObservable = getObservable(sessionId);
     if (popup == null || contextSizeObservable == null) {
       return;
     }
@@ -122,11 +146,11 @@ public class ContextWindowService {
    * @param popup the popup to unbind
    */
   void unbindContextWindowPopup(ContextWindowPopup popup) {
-    if (popup == null || contextSizeObservable == null) {
+    if (popup == null) {
       return;
     }
 
-    contextSizeObservable.getRealm().exec(() -> {
+    Display.getDefault().asyncExec(() -> {
       ISideEffect sideEffect = popupSideEffects.remove(popup);
       if (sideEffect != null) {
         sideEffect.dispose();
@@ -138,15 +162,26 @@ public class ContextWindowService {
    * Disposes all bindings owned by this service.
    */
   public void dispose() {
-    if (contextSizeObservable == null) {
-      return;
+    for (IObservableValue<ContextSizeInfo> observable : contextSizeObservables.values()) {
+      observable.getRealm().exec(observable::dispose);
     }
+    popupSideEffects.values().forEach(ISideEffect::dispose);
+    popupSideEffects.clear();
+    contextSizeObservables.clear();
+  }
 
-    contextSizeObservable.getRealm().exec(() -> {
-      popupSideEffects.values().forEach(ISideEffect::dispose);
-      popupSideEffects.clear();
-      contextSizeObservable.dispose();
-      contextSizeObservable = null;
+  private IObservableValue<ContextSizeInfo> getObservable(String sessionId) {
+    String key = sessionId != null ? sessionId : "";
+    return contextSizeObservables.computeIfAbsent(key, ignored -> {
+      AtomicReference<IObservableValue<ContextSizeInfo>> ref = new AtomicReference<>();
+      SwtUtils.invokeOnDisplayThread(() -> {
+        Realm realm = Realm.getDefault();
+        if (realm == null) {
+          realm = DisplayRealm.getRealm(Display.getCurrent());
+        }
+        Realm.runWithDefault(realm, () -> ref.set(new WritableValue<>(null, ContextSizeInfo.class)));
+      });
+      return ref.get();
     });
   }
 }

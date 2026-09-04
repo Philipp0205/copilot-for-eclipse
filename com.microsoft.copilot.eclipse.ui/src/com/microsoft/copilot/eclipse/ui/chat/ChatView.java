@@ -33,8 +33,11 @@ import org.eclipse.swt.widgets.Composite;
 import org.eclipse.swt.widgets.Control;
 import org.eclipse.swt.widgets.Display;
 import org.eclipse.swt.widgets.ScrollBar;
+import org.eclipse.ui.IMemento;
 import org.eclipse.ui.IPartListener2;
+import org.eclipse.ui.IViewSite;
 import org.eclipse.ui.IWorkbenchPartReference;
+import org.eclipse.ui.PartInitException;
 import org.eclipse.ui.PlatformUI;
 import org.eclipse.ui.contexts.IContextActivation;
 import org.eclipse.ui.contexts.IContextService;
@@ -88,6 +91,8 @@ import com.microsoft.copilot.eclipse.ui.UiConstants;
 import com.microsoft.copilot.eclipse.ui.chat.services.AgentToolService;
 import com.microsoft.copilot.eclipse.ui.chat.services.ChatCompletionService;
 import com.microsoft.copilot.eclipse.ui.chat.services.ChatServiceManager;
+import com.microsoft.copilot.eclipse.ui.chat.services.CopilotSession;
+import com.microsoft.copilot.eclipse.ui.chat.services.CopilotSessionRegistry;
 import com.microsoft.copilot.eclipse.ui.chat.services.DebugEventAutoResponseHandler;
 import com.microsoft.copilot.eclipse.ui.chat.services.ReferencedFileService;
 import com.microsoft.copilot.eclipse.ui.chat.services.TodoListService;
@@ -108,6 +113,9 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
   // service
   private ChatServiceManager chatServiceManager;
   private ConversationPersistenceManager persistenceManager;
+  private String sessionId;
+  private CopilotSessionRegistry sessionRegistry;
+  private String restoredConversationId;
 
   private Composite parent;
   private TopBanner topBanner;
@@ -161,12 +169,30 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
    * icon to the warning icon.
    */
   private static final double RATE_LIMIT_WARNING_THRESHOLD_PERCENT_REMAINING = 25.0;
+  private static final String MEMENTO_CONVERSATION_ID = "conversationId";
 
   private IContextActivation chatViewContextActivation;
   private IPartListener2 partListener;
 
   @Override
+  public void init(IViewSite site, IMemento memento) throws PartInitException {
+    super.init(site, memento);
+    if (memento != null) {
+      restoredConversationId = memento.getString(MEMENTO_CONVERSATION_ID);
+    }
+  }
+
+  @Override
+  public void saveState(IMemento memento) {
+    if (StringUtils.isNotBlank(conversationId)) {
+      memento.putString(MEMENTO_CONVERSATION_ID, conversationId);
+    }
+  }
+
+  @Override
   public void createPartControl(Composite parent) {
+    String secondaryId = getViewSite().getSecondaryId();
+    this.sessionId = StringUtils.isNotBlank(secondaryId) ? secondaryId : "primary";
     this.parent = parent;
     GridLayout layout = new GridLayout(1, true);
     layout.verticalSpacing = 0;
@@ -202,6 +228,9 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
     }
 
     this.chatOnSendHandler = event -> {
+      if (!ChatSessionEvent.isForSession(event, sessionId)) {
+        return;
+      }
       Object params = event.getProperty(IEventBroker.DATA);
       if (params != null && params instanceof Map properties) {
         String workDoneToken = UUID.randomUUID().toString();
@@ -213,6 +242,9 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
     this.eventBroker.subscribe(CopilotEventConstants.TOPIC_CHAT_ON_SEND, this.chatOnSendHandler);
 
     this.chatMessageSendHandler = event -> {
+      if (!ChatSessionEvent.isForSession(event, sessionId)) {
+        return;
+      }
       Object params = event.getProperty(IEventBroker.DATA);
       if (params != null && params instanceof Map properties) {
         String workDoneToken = (String) properties.get("workDoneToken");
@@ -240,22 +272,31 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
     this.eventBroker.subscribe(CopilotEventConstants.TOPIC_AUTH_STATUS_CHANGED, this.authStatusChangedHandler);
 
     this.hideChatHistoryHandler = event -> {
-      hideChatHistory();
+      if (ChatSessionEvent.isForSession(event, sessionId)) {
+        hideChatHistory();
+      }
     };
     this.eventBroker.subscribe(CopilotEventConstants.TOPIC_CHAT_HIDE_CHAT_HISTORY, this.hideChatHistoryHandler);
 
     this.showChatHistoryHandler = event -> {
-      showChatHistory();
+      if (ChatSessionEvent.isForSession(event, sessionId)) {
+        showChatHistory();
+      }
     };
     this.eventBroker.subscribe(CopilotEventConstants.TOPIC_CHAT_SHOW_CHAT_HISTORY, this.showChatHistoryHandler);
 
     this.historyBackClickedHandler = event -> {
-      hideChatHistory();
+      if (ChatSessionEvent.isForSession(event, sessionId)) {
+        hideChatHistory();
+      }
     };
     this.eventBroker.subscribe(CopilotEventConstants.TOPIC_CHAT_HISTORY_BACK_CLICKED, this.historyBackClickedHandler);
 
     this.historyConversationSelectedHandler = event -> {
-      Object conversationData = event.getProperty(IEventBroker.DATA);
+      if (!ChatSessionEvent.isForSession(event, sessionId)) {
+        return;
+      }
+      Object conversationData = ChatSessionEvent.payload(event);
       ConversationXmlData conversation = conversationData instanceof ConversationXmlData
           ? (ConversationXmlData) conversationData
           : null;
@@ -284,6 +325,7 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
           // Set the conversation ID and state for history-based conversation
           ChatView.this.conversationId = historyConversation.getConversationId();
           ChatView.this.conversationState = ConversationState.NEW_HISTORY_BASED_CONVERSATION;
+          ChatView.this.updateSessionConversation();
 
           // Ensure we have a chat content viewer
           if (!hasHistory) {
@@ -319,7 +361,7 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
           List<TodoItem> todos = historyConversation.getTodos();
           TodoListService todoService = chatServiceManager.getTodoListService();
           if (todoService != null && todos != null && !todos.isEmpty()) {
-            todoService.setTodoList(todos);
+            todoService.setTodoList(sessionId, todos);
           }
 
           // Scroll to bottom after restoring all turns
@@ -338,10 +380,16 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
         this.historyConversationSelectedHandler);
 
     this.conversationTitleUpdatedHandler = event -> {
-      Object titleData = event.getProperty(IEventBroker.DATA);
+      if (!ChatSessionEvent.isForSession(event, sessionId)) {
+        return;
+      }
+      Object titleData = ChatSessionEvent.payload(event);
       if (titleData instanceof String newTitle && StringUtils.isNotEmpty(newTitle) && topBanner != null
           && !topBanner.isDisposed()) {
         topBanner.updateTitle(newTitle);
+        if (sessionRegistry != null) {
+          sessionRegistry.updateTitle(sessionId, newTitle);
+        }
       }
     };
     this.eventBroker.subscribe(CopilotEventConstants.TOPIC_CHAT_CONVERSATION_TITLE_UPDATED,
@@ -356,6 +404,9 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
     this.eventBroker.subscribe(CopilotEventConstants.TOPIC_CHAT_CODING_AGENT_MESSAGE, this.codingAgentMessageHandler);
 
     this.autoBreakpointToggleHandler = event -> {
+      if (!ChatSessionEvent.isForSession(event, sessionId)) {
+        return;
+      }
       Object data = event.getProperty(IEventBroker.DATA);
       if (data instanceof Map<?, ?> map) {
         Boolean enabled = (Boolean) map.get("enabled");
@@ -434,7 +485,7 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
         }
         this.chatContentViewer.hideCompactingStatusOnLatestCopilotTurn();
         if (params.contextInfo() != null) {
-          this.chatServiceManager.getContextWindowService().updateContextSize(params.contextInfo());
+          this.chatServiceManager.getContextWindowService().updateContextSize(sessionId, params.contextInfo());
         }
       }, parent);
     };
@@ -452,15 +503,17 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
    */
   private void initializeChatServices() {
     this.persistenceManager = this.chatServiceManager.getPersistenceManager();
+    this.sessionRegistry = this.chatServiceManager.getSessionRegistry();
+    this.sessionRegistry.registerView(sessionId, this);
     chatServiceManager.getUserPreferenceService().bindChatView(this);
     chatServiceManager.getAgentToolService().bindChatView(this);
     chatServiceManager.getFileToolService().bindWorkingSetBar(this);
     chatServiceManager.getTodoListService().bindTodoListBar(this);
-
     SwtUtils.invokeOnDisplayThreadAsync(() -> {
       String authStatus = chatServiceManager.getAuthStatusManager().getCopilotStatus();
       if (authStatus != null) {
         buildViewFor(authStatus);
+        restoreSavedConversation();
       }
     }, parent);
 
@@ -468,6 +521,21 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
     IPreferenceStore preferenceStore = CopilotUi.getPlugin().getPreferenceStore();
     if (preferenceStore.getBoolean(Constants.AUTO_BREAKPOINT_RESPONSE)) {
       enableAutoBreakpointResponse();
+    }
+  }
+
+  private void restoreSavedConversation() {
+    if (StringUtils.isBlank(restoredConversationId) || persistenceManager == null) {
+      return;
+    }
+    ConversationXmlData saved = persistenceManager.listConversations().stream()
+        .filter(conversation -> restoredConversationId.equals(conversation.getConversationId()))
+        .findFirst()
+        .orElse(null);
+    restoredConversationId = null;
+    if (saved != null) {
+      eventBroker.post(CopilotEventConstants.TOPIC_CHAT_HISTORY_CONVERSATION_SELECTED,
+          ChatSessionEvent.forSession(sessionId, saved));
     }
   }
 
@@ -632,7 +700,7 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
 
   private void createAgentModeView() {
     // upper bar
-    this.topBanner = new TopBanner(parent, SWT.NONE);
+    this.topBanner = new TopBanner(parent, SWT.NONE, sessionId);
     this.topBanner.registerNewConversationListener(this);
 
     createOrReuseContentWrapper();
@@ -671,7 +739,7 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
 
   private void createChatModeView() {
     // upper bar
-    this.topBanner = new TopBanner(parent, SWT.NONE);
+    this.topBanner = new TopBanner(parent, SWT.NONE, sessionId);
     this.topBanner.registerNewConversationListener(this);
 
     createOrReuseContentWrapper();
@@ -760,7 +828,7 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
   }
 
   private void createActionBar() {
-    this.actionBar = new ActionBar(parent, SWT.NONE, chatServiceManager);
+    this.actionBar = new ActionBar(parent, SWT.NONE, chatServiceManager, sessionId);
     this.actionBar.registerMessageListener(this);
     this.topBanner.registerNewConversationListener(this.actionBar);
   }
@@ -776,7 +844,7 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
    */
   private void createConversationPage() {
     clearChatView(this.contentWrapper);
-    this.chatContentViewer = new ChatContentViewer(this.contentWrapper, SWT.NONE, this.chatServiceManager);
+    this.chatContentViewer = new ChatContentViewer(this.contentWrapper, SWT.NONE, this.chatServiceManager, sessionId);
     this.chatContentViewer.requestLayout();
   }
 
@@ -845,11 +913,14 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
    */
   @Override
   public void onChatProgress(ChatProgressValue value) {
-    if (this.actionBar.isSendButton()) {
+    if (this.actionBar == null || this.actionBar.isSendButton()) {
       return;
     }
     switch (value.getKind()) {
       case begin:
+        if (sessionRegistry != null) {
+          sessionRegistry.updateStatus(sessionId, CopilotSession.Status.RUNNING);
+        }
         if (this.chatContentViewer != null) {
           this.chatContentViewer.getLatestOrCreateNewTurnWidget(value.getTurnId(), true, false);
         }
@@ -858,6 +929,7 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
         if (StringUtils.isNotBlank(value.getParentTurnId())) {
           // Entering a subagent context - store the subagent conversation ID
           this.subagentConversationId = value.getConversationId();
+          updateSessionConversation();
         } else {
           // Not in subagent context - update the main conversation ID
           String newConversationId = value.getConversationId();
@@ -873,6 +945,7 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
             // Set the new conversation ID and update state
             this.conversationId = newConversationId;
             this.conversationState = ConversationState.CONTINUED_CONVERSATION;
+            updateSessionConversation();
           }
           // Always sync conversationId — chatContentViewer may have been recreated
           if (this.chatContentViewer != null) {
@@ -907,7 +980,7 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
         // Update context size donut if data is available
         ContextSizeInfo contextSize = value.getContextSize();
         if (contextSize != null) {
-          this.chatServiceManager.getContextWindowService().updateContextSize(contextSize);
+          this.chatServiceManager.getContextWindowService().updateContextSize(sessionId, contextSize);
         }
 
         if (value.getSteps() != null) {
@@ -950,6 +1023,7 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
         if (StringUtils.isBlank(value.getParentTurnId()) && this.subagentConversationId != null) {
           this.subagentConversationId = null;
           this.lastRunSubagentToolCallId = null;
+          updateSessionConversation();
         }
 
         // Cache conversation progress on report
@@ -977,6 +1051,12 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
           this.chatContentViewer.processTurnEvent(value);
           this.actionBar.resetSendButton();
           this.topBanner.updateTitle(value.getSuggestedTitle());
+          if (sessionRegistry != null) {
+            sessionRegistry.updateTitle(sessionId, value.getSuggestedTitle());
+            sessionRegistry.updateStatus(sessionId,
+                StringUtils.isNotBlank(value.getErrorMessage()) ? CopilotSession.Status.FAILED
+                    : CopilotSession.Status.IDLE);
+          }
         }
         String endThinkingBlockId = this.chatContentViewer != null
             ? this.chatContentViewer.getActiveThinkingBlockId(value.getTurnId()) : null;
@@ -988,7 +1068,7 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
           // Persist todo list at end phase
           TodoListService todoListService = chatServiceManager.getTodoListService();
           if (todoListService != null) {
-            List<TodoItem> todos = todoListService.getTodoList();
+            List<TodoItem> todos = todoListService.getTodoList(sessionId);
             if (todos != null && !todos.isEmpty()) {
               persistenceManager.updateTodoList(this.conversationId, todos);
             }
@@ -1009,9 +1089,8 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
 
   @Override
   public void setFocus() {
-    ChatEventsManager p = CopilotCore.getPlugin().getChatEventsManager();
-    if (p != null && !p.chatProgressListeners.contains(this)) {
-      p.addChatProgressListener(this);
+    if (sessionRegistry != null) {
+      sessionRegistry.setActive(sessionId);
     }
     if (actionBar != null) {
       actionBar.setFocusToInputTextViewer();
@@ -1020,6 +1099,13 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
 
   private void onSendInternal(String workDoneToken, String message, String agentSlug, String agentJobWorkspaceFolder,
       boolean createNewTurn) {
+    ChatEventsManager eventsManager = CopilotCore.getPlugin().getChatEventsManager();
+    if (eventsManager != null) {
+      eventsManager.registerProgressRoute(workDoneToken, this);
+    }
+    if (sessionRegistry != null) {
+      sessionRegistry.updateStatus(sessionId, CopilotSession.Status.RUNNING);
+    }
     String processedMessage = replaceWorkspaceCommand(message);
 
     // Persist the user input to history
@@ -1068,7 +1154,7 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
     fileService.cleanupNonExistentFiles();
 
     IFile currentFile = fileService.getCurrentFile();
-    List<IResource> references = fileService.getReferencedFiles();
+    List<IResource> references = fileService.getReferencedFiles(sessionId);
     Range currentSelection = fileService.getCurrentSelection();
 
     final CopilotLanguageServerConnection ls = CopilotCore.getPlugin().getCopilotLanguageServer();
@@ -1095,7 +1181,7 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
       List<TodoItem> currentTodos = null;
       if (StringUtils.isBlank(agentSlug)) {
         TodoListService todoListService = chatServiceManager.getTodoListService();
-        currentTodos = todoListService != null ? todoListService.getTodoList() : null;
+        currentTodos = todoListService != null ? todoListService.getTodoList(sessionId) : null;
       }
 
       String turnReasoningEffort = chatServiceManager.getModelService().resolveEffectiveReasoningEffort(activeModel);
@@ -1153,11 +1239,12 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
         // Get todos to restore for session continuation
         TodoListService todoListService = chatServiceManager.getTodoListService();
         if (todoListService != null) {
-          todosToRestore = todoListService.getTodoList();
+          todosToRestore = todoListService.getTodoList(sessionId);
         }
       } else if (conversationState == ConversationState.NEW_CONVERSATION) {
         // Generate a temporary ID for brand new conversation and persist user turn
         this.conversationId = UUID.randomUUID().toString();
+        updateSessionConversation();
         this.persistUserTurnFuture = persistenceManager.persistUserTurnInfo(this.conversationId, null,
             processedMessage, activeModel, chatModeName, customChatModeId, currentFile, references);
       }
@@ -1280,6 +1367,9 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
   }
 
   private void displayErrorAndResetSendButton(String workDoneToken, String message) {
+    if (sessionRegistry != null) {
+      sessionRegistry.updateStatus(sessionId, CopilotSession.Status.FAILED);
+    }
     if (message == null) {
       message = Messages.chat_warnWidget_defaultErrorMsg;
     }
@@ -1387,19 +1477,25 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
     this.hasHistory = false;
     this.conversationId = "";
     this.conversationState = ConversationState.NEW_CONVERSATION;
+    updateSessionConversation();
+    if (sessionRegistry != null) {
+      sessionRegistry.updateStatus(sessionId, CopilotSession.Status.IDLE);
+      sessionRegistry.updateTitle(sessionId, "");
+    }
 
     if (this.chatServiceManager == null) {
       return;
     }
 
-    this.chatServiceManager.getContextWindowService().clearContextSize();
-    this.chatServiceManager.getReferencedFileService().updateReferencedFiles(List.of());
-    SwtUtils.invokeOnDisplayThreadAsync(this.chatServiceManager.getFileToolService()::disposeWorkingSetBar);
+    this.chatServiceManager.getContextWindowService().clearContextSize(sessionId);
+    this.chatServiceManager.getReferencedFileService().updateReferencedFiles(sessionId, List.of());
+    SwtUtils.invokeOnDisplayThreadAsync(
+        () -> this.chatServiceManager.getFileToolService().disposeWorkingSetBar(sessionId));
 
     // Clear todo list UI (no need to notify CLS as we're just clearing the UI)
     TodoListService todoListService = chatServiceManager.getTodoListService();
     if (todoListService != null) {
-      todoListService.setTodoList(List.of());
+      todoListService.setTodoList(sessionId, List.of());
     }
   }
 
@@ -1471,6 +1567,16 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
    */
   public String getConversationId() {
     return this.conversationId;
+  }
+
+  public String getSessionId() {
+    return sessionId;
+  }
+
+  private void updateSessionConversation() {
+    if (sessionRegistry != null) {
+      sessionRegistry.updateConversation(sessionId, conversationId, subagentConversationId);
+    }
   }
 
   /**
@@ -1565,6 +1671,7 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
     ChatEventsManager p = CopilotCore.getPlugin().getChatEventsManager();
     if (p != null) {
       p.removeChatProgressListener(this);
+      p.unregisterProgressRoutes(this);
     }
 
     // Cancel any pending conversation futures
@@ -1632,18 +1739,22 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
 
     if (this.chatServiceManager != null) {
       if (this.chatServiceManager.getUserPreferenceService() != null) {
-        this.chatServiceManager.getUserPreferenceService().unbindChatView();
+        this.chatServiceManager.getUserPreferenceService().unbindChatView(this);
       }
       if (this.chatServiceManager.getAgentToolService() != null) {
-        this.chatServiceManager.getAgentToolService().unbindChatView();
+        this.chatServiceManager.getAgentToolService().unbindChatView(this);
       }
       if (this.chatServiceManager.getFileToolService() != null) {
-        this.chatServiceManager.getFileToolService().unbindWorkingSetBar();
+        this.chatServiceManager.getFileToolService().unbindWorkingSetBar(this);
       }
       if (this.chatServiceManager.getTodoListService() != null) {
-        this.chatServiceManager.getTodoListService().unbindTodoListBar();
+        this.chatServiceManager.getTodoListService().unbindTodoListBar(this);
       }
       this.chatServiceManager = null;
+    }
+    if (sessionRegistry != null) {
+      sessionRegistry.unregisterView(sessionId, this);
+      sessionRegistry = null;
     }
     if (this.actionBar != null) {
       this.actionBar.unregisterMessageListener(this);
@@ -1759,7 +1870,8 @@ public class ChatView extends ViewPart implements ChatProgressListener, MessageL
     // Use the current conversation ID for current conversation detection
     String currentConversationId = this.conversationId;
 
-    chatHistoryViewer = new ChatHistoryViewer(contentWrapper, SWT.NONE, conversations, currentConversationId);
+    chatHistoryViewer = new ChatHistoryViewer(contentWrapper, SWT.NONE, conversations, currentConversationId,
+        sessionId);
     chatHistoryViewer.setLayoutData(new GridData(SWT.FILL, SWT.FILL, true, true));
 
     isChatHistoryVisible = true;

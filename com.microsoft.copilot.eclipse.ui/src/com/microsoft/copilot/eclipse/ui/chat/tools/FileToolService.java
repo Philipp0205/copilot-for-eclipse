@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.eclipse.core.databinding.observable.sideeffect.ISideEffect;
 import org.eclipse.core.databinding.observable.value.IObservableValue;
@@ -22,10 +23,11 @@ import com.microsoft.copilot.eclipse.core.CopilotCore;
 import com.microsoft.copilot.eclipse.core.events.CopilotEventConstants;
 import com.microsoft.copilot.eclipse.core.lsp.CopilotLanguageServerConnection;
 import com.microsoft.copilot.eclipse.ui.CopilotUi;
+import com.microsoft.copilot.eclipse.ui.chat.ChatSessionEvent;
 import com.microsoft.copilot.eclipse.ui.chat.ChatView;
-import com.microsoft.copilot.eclipse.ui.chat.ConversationUtils;
 import com.microsoft.copilot.eclipse.ui.chat.WorkingSetBar;
 import com.microsoft.copilot.eclipse.ui.chat.services.ChatBaseService;
+import com.microsoft.copilot.eclipse.ui.chat.services.CopilotSession;
 import com.microsoft.copilot.eclipse.ui.chat.services.TodoListService;
 
 /**
@@ -33,15 +35,10 @@ import com.microsoft.copilot.eclipse.ui.chat.services.TodoListService;
  * the files to be created or edited and the enable state of the button.
  */
 public class FileToolService extends ChatBaseService {
-  private IObservableValue<Map<ChangedFile, FileChangeProperty>> filesObservable;
-  private IObservableValue<Boolean> buttonEnableObservable;
-
-  private WorkingSetBar workingSetBar;
+  private final Map<String, SessionFileState> sessionStates = new ConcurrentHashMap<>();
+  private final ThreadLocal<String> invocationSession = new ThreadLocal<>();
   private CreateFileTool createFileTool;
   private EditFileTool editFileTool;
-
-  private ISideEffect filesSideEffect;
-  private ISideEffect buttonEnableSideEffect;
 
   /**
    * Constructor for FileToolService.
@@ -49,14 +46,12 @@ public class FileToolService extends ChatBaseService {
   public FileToolService(CopilotLanguageServerConnection lsConnection) {
     super(lsConnection, null);
 
-    ensureRealm(() -> {
-      filesObservable = new WritableValue<>(new LinkedHashMap<>(), Map.class);
-      buttonEnableObservable = new WritableValue<>(false, Boolean.class);
-    });
-
     IEventBroker eventBroker = PlatformUI.getWorkbench().getService(IEventBroker.class);
     eventBroker.subscribe(CopilotEventConstants.TOPIC_CHAT_NEW_CONVERSATION, event -> {
-      onResolveAllChanges();
+      SessionFileState state = sessionStates.get(ChatSessionEvent.sessionId(event));
+      if (state != null) {
+        onResolveAllChanges(state);
+      }
     });
   }
 
@@ -74,28 +69,33 @@ public class FileToolService extends ChatBaseService {
     }
 
     ensureRealm(() -> {
-      unbindWorkingSetBar();
-      filesSideEffect = ISideEffect.create(() -> filesObservable.getValue(),
+      unbindWorkingSetBar(chatView);
+      SessionFileState state = new SessionFileState(chatView);
+      state.filesObservable = new WritableValue<>(new LinkedHashMap<>(), Map.class);
+      state.buttonEnableObservable = new WritableValue<>(false, Boolean.class);
+      sessionStates.put(chatView.getSessionId(), state);
+      state.filesSideEffect = ISideEffect.create(() -> state.filesObservable.getValue(),
           (Map<ChangedFile, FileChangeProperty> filesMap) -> {
             if (filesMap.isEmpty()) {
-              disposeWorkingSetBar();
+              disposeWorkingSetBar(state);
             } else {
-              if (this.workingSetBar == null || this.workingSetBar.isDisposed()) {
-                this.workingSetBar = new WorkingSetBar(chatView.getActionBar().getInputArea(), SWT.NONE);
+              if (state.workingSetBar == null || state.workingSetBar.isDisposed()) {
+                state.workingSetBar = new WorkingSetBar(chatView.getActionBar().getInputArea(), SWT.NONE);
               }
               // Position WorkingSetBar below TodoListBar (if present), otherwise at the top of
               // inputArea. The StaticBanner sits on the outer ActionBar as a sibling of inputArea,
               // so it remains above this bar regardless of this call.
-              positionWorkingSetBar(chatView);
-              this.workingSetBar.buildSummaryBarFor(filesMap);
+              positionWorkingSetBar(state);
+              state.workingSetBar.buildSummaryBarFor(filesMap);
             }
           });
-      buttonEnableSideEffect = ISideEffect.create(() -> buttonEnableObservable.getValue(), (Boolean status) -> {
-        if (this.workingSetBar == null || this.workingSetBar.isDisposed()) {
-          return;
-        }
-        this.workingSetBar.setButtonStatus(status);
-      });
+      state.buttonEnableSideEffect = ISideEffect.create(() -> state.buttonEnableObservable.getValue(),
+          (Boolean status) -> {
+            if (state.workingSetBar == null || state.workingSetBar.isDisposed()) {
+              return;
+            }
+            state.workingSetBar.setButtonStatus(status);
+          });
     });
   }
 
@@ -103,40 +103,43 @@ public class FileToolService extends ChatBaseService {
    * Unbind the WorkingSetBar and dispose side effects.
    */
   public void unbindWorkingSetBar() {
+    for (SessionFileState state : new ArrayList<>(sessionStates.values())) {
+      unbindWorkingSetBar(state.chatView);
+    }
+  }
+
+  /** Unbind one session's changed-files bar. */
+  public void unbindWorkingSetBar(ChatView chatView) {
+    SessionFileState state = chatView != null ? sessionStates.remove(chatView.getSessionId()) : null;
+    if (state == null) {
+      return;
+    }
     ensureRealm(() -> {
-      if (filesSideEffect != null) {
-        filesSideEffect.dispose();
-        filesSideEffect = null;
+      if (state.filesSideEffect != null) {
+        state.filesSideEffect.dispose();
       }
-      if (buttonEnableSideEffect != null) {
-        buttonEnableSideEffect.dispose();
-        buttonEnableSideEffect = null;
+      if (state.buttonEnableSideEffect != null) {
+        state.buttonEnableSideEffect.dispose();
       }
-
-      ConversationUtils.confirmEndChat();
-      disposeWorkingSetBar();
-
-      // Clear observables to prevent stale data when view is reopened
-      filesObservable.setValue(new LinkedHashMap<>());
-      buttonEnableObservable.setValue(false);
+      disposeWorkingSetBar(state);
     });
   }
 
   /**
    * Position the WorkingSetBar below TodoListBar if present, otherwise at top.
    */
-  private void positionWorkingSetBar(ChatView chatView) {
-    if (this.workingSetBar == null || this.workingSetBar.isDisposed()) {
+  private void positionWorkingSetBar(SessionFileState state) {
+    if (state.workingSetBar == null || state.workingSetBar.isDisposed()) {
       return;
     }
     TodoListService todoListService = CopilotUi.getPlugin().getChatServiceManager().getTodoListService();
     if (todoListService != null && todoListService.getTodoListBar() != null
         && !todoListService.getTodoListBar().isDisposed()) {
       // Position below TodoListBar
-      this.workingSetBar.moveBelow(todoListService.getTodoListBar());
+      state.workingSetBar.moveBelow(todoListService.getTodoListBar());
     } else {
       // No TodoListBar, position at top
-      this.workingSetBar.moveAbove(null);
+      state.workingSetBar.moveAbove(null);
     }
   }
 
@@ -144,8 +147,12 @@ public class FileToolService extends ChatBaseService {
    * Enable or disable the buttons for the working set bar.
    */
   public void setWorkingSetBarButtonStatus(boolean status) {
+    SessionFileState state = currentState();
+    if (state == null) {
+      return;
+    }
     ensureRealm(() -> {
-      buttonEnableObservable.setValue(status);
+      state.buttonEnableObservable.setValue(status);
     });
   }
 
@@ -153,8 +160,12 @@ public class FileToolService extends ChatBaseService {
    * Set the changed files for the working set bar.
    */
   public void setChangedFiles(Map<ChangedFile, FileChangeProperty> files) {
+    SessionFileState state = currentState();
+    if (state == null) {
+      return;
+    }
     ensureRealm(() -> {
-      filesObservable.setValue(files);
+      state.filesObservable.setValue(files);
     });
   }
 
@@ -162,28 +173,34 @@ public class FileToolService extends ChatBaseService {
    * Get the changed files for the working set bar.
    */
   public Map<ChangedFile, FileChangeProperty> getChangedFiles() {
-    return filesObservable.getValue();
+    SessionFileState state = currentState();
+    return state != null ? state.filesObservable.getValue() : Map.of();
   }
 
   /**
    * Get the WorkingSetBar instance.
    */
   public WorkingSetBar getWorkingSetBar() {
-    return workingSetBar;
+    SessionFileState state = currentState();
+    return state != null ? state.workingSetBar : null;
   }
 
   /**
    * Add a changed file to the working set bar.
    */
   public void addChangedFile(ChangedFile file, FileChangeType fileChangeType) {
+    SessionFileState state = currentState();
+    if (state == null) {
+      return;
+    }
     ensureRealm(() -> {
-      Map<ChangedFile, FileChangeProperty> filesMap = new LinkedHashMap<>(filesObservable.getValue());
+      Map<ChangedFile, FileChangeProperty> filesMap = new LinkedHashMap<>(state.filesObservable.getValue());
       if (filesMap.containsKey(file)) {
         return;
       }
       filesMap.put(file, new FileChangeProperty(fileChangeType));
-      filesObservable.setValue(filesMap);
-      buttonEnableObservable.setValue(false);
+      state.filesObservable.setValue(filesMap);
+      state.buttonEnableObservable.setValue(false);
     });
   }
 
@@ -193,13 +210,17 @@ public class FileToolService extends ChatBaseService {
    * @param file the file to complete
    */
   public void completeFile(ChangedFile file) {
+    SessionFileState state = currentState();
+    if (state == null) {
+      return;
+    }
     ensureRealm(() -> {
-      Map<ChangedFile, FileChangeProperty> filesMap = new LinkedHashMap<>(filesObservable.getValue());
+      Map<ChangedFile, FileChangeProperty> filesMap = new LinkedHashMap<>(state.filesObservable.getValue());
       filesMap.remove(file);
-      filesObservable.setValue(filesMap);
+      state.filesObservable.setValue(filesMap);
 
       if (filesMap.isEmpty()) {
-        onResolveAllChanges();
+        onResolveAllChanges(state);
       }
     });
   }
@@ -211,7 +232,8 @@ public class FileToolService extends ChatBaseService {
    * @return the file change type, or null if the file is not in the list
    */
   private FileChangeType getFileChangeTypeInternal(ChangedFile file) {
-    FileChangeProperty property = filesObservable.getValue().get(file);
+    SessionFileState state = currentState();
+    FileChangeProperty property = state != null ? state.filesObservable.getValue().get(file) : null;
     if (property != null) {
       return property.getChangeType();
     } else {
@@ -237,7 +259,11 @@ public class FileToolService extends ChatBaseService {
    * Handles the action of keeping all changes to files.
    */
   public void onKeepAllChanges() {
-    for (ChangedFile file : new ArrayList<>(filesObservable.getValue().keySet())) {
+    SessionFileState state = currentState();
+    if (state == null) {
+      return;
+    }
+    for (ChangedFile file : new ArrayList<>(state.filesObservable.getValue().keySet())) {
       if (getFileChangeTypeInternal(file) == FileChangeType.Created) {
         this.createFileTool.onKeepChange(file);
       } else if (getFileChangeTypeInternal(file) == FileChangeType.Changed) {
@@ -269,8 +295,12 @@ public class FileToolService extends ChatBaseService {
    * Handles the action of undoing all changes to files.
    */
   public void onUndoAllChanges() {
+    SessionFileState state = currentState();
+    if (state == null) {
+      return;
+    }
     try {
-      for (ChangedFile file : new ArrayList<>(filesObservable.getValue().keySet())) {
+      for (ChangedFile file : new ArrayList<>(state.filesObservable.getValue().keySet())) {
         if (getFileChangeTypeInternal(file) == FileChangeType.Created) {
           this.createFileTool.onUndoChange(file);
         } else if (getFileChangeTypeInternal(file) == FileChangeType.Changed) {
@@ -289,7 +319,8 @@ public class FileToolService extends ChatBaseService {
    * @param file the file to view the diff for
    */
   public void onViewDiff(ChangedFile file) {
-    FileChangeProperty property = filesObservable.getValue().get(file);
+    SessionFileState state = currentState();
+    FileChangeProperty property = state != null ? state.filesObservable.getValue().get(file) : null;
     if (property == null) {
       return;
     }
@@ -304,12 +335,19 @@ public class FileToolService extends ChatBaseService {
    * Handles the action of clicking done button to resolve all changes.
    */
   public void onResolveAllChanges() {
+    SessionFileState state = currentState();
+    if (state != null) {
+      onResolveAllChanges(state);
+    }
+  }
+
+  private void onResolveAllChanges(SessionFileState state) {
     this.createFileTool.onResolveAllChanges();
     this.editFileTool.onResolveAllChanges();
     ensureRealm(() -> {
-      this.filesObservable.setValue(new LinkedHashMap<>());
-      this.buttonEnableObservable.setValue(false);
-      this.disposeWorkingSetBar();
+      state.filesObservable.setValue(new LinkedHashMap<>());
+      state.buttonEnableObservable.setValue(false);
+      disposeWorkingSetBar(state);
     });
   }
 
@@ -317,11 +355,58 @@ public class FileToolService extends ChatBaseService {
    * Dispose the WorkingSetBar.
    */
   public void disposeWorkingSetBar() {
-    if (workingSetBar != null && !workingSetBar.isDisposed()) {
-      Composite control = workingSetBar.getParent();
-      workingSetBar.dispose();
-      workingSetBar = null;
+    SessionFileState state = currentState();
+    if (state != null) {
+      disposeWorkingSetBar(state);
+    }
+  }
+
+  /** Dispose one session's changed-files bar. */
+  public void disposeWorkingSetBar(String sessionId) {
+    SessionFileState state = sessionStates.get(sessionId);
+    if (state != null) {
+      disposeWorkingSetBar(state);
+    }
+  }
+
+  private void disposeWorkingSetBar(SessionFileState state) {
+    if (state.workingSetBar != null && !state.workingSetBar.isDisposed()) {
+      Composite control = state.workingSetBar.getParent();
+      state.workingSetBar.dispose();
+      state.workingSetBar = null;
       control.requestLayout();
+    }
+  }
+
+  /** Route synchronous file tool updates to a session. */
+  public void enterInvocationSession(String sessionId) {
+    invocationSession.set(sessionId);
+  }
+
+  /** Clear the current file tool routing context. */
+  public void exitInvocationSession() {
+    invocationSession.remove();
+  }
+
+  private SessionFileState currentState() {
+    String sessionId = invocationSession.get();
+    if (sessionId == null) {
+      CopilotSession active = CopilotUi.getPlugin().getChatServiceManager().getSessionRegistry().getActive();
+      sessionId = active != null ? active.getSessionId() : null;
+    }
+    return sessionId != null ? sessionStates.get(sessionId) : null;
+  }
+
+  private static final class SessionFileState {
+    private final ChatView chatView;
+    private IObservableValue<Map<ChangedFile, FileChangeProperty>> filesObservable;
+    private IObservableValue<Boolean> buttonEnableObservable;
+    private WorkingSetBar workingSetBar;
+    private ISideEffect filesSideEffect;
+    private ISideEffect buttonEnableSideEffect;
+
+    private SessionFileState(ChatView chatView) {
+      this.chatView = chatView;
     }
   }
 

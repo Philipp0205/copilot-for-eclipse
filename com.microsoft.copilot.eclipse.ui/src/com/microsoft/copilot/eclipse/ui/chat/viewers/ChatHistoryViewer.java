@@ -37,6 +37,7 @@ import com.microsoft.copilot.eclipse.core.persistence.ConversationPersistenceMan
 import com.microsoft.copilot.eclipse.core.persistence.ConversationXmlData;
 import com.microsoft.copilot.eclipse.core.utils.PlatformUtils;
 import com.microsoft.copilot.eclipse.ui.CopilotUi;
+import com.microsoft.copilot.eclipse.ui.chat.ChatSessionEvent;
 import com.microsoft.copilot.eclipse.ui.chat.ConversationUtils;
 import com.microsoft.copilot.eclipse.ui.chat.services.ChatFontService;
 import com.microsoft.copilot.eclipse.ui.i18n.Messages;
@@ -57,6 +58,7 @@ public class ChatHistoryViewer extends Composite {
   private IStylingEngine stylingEngine;
   private ChatFontService chatFontService;
   private final Cursor handCursor;
+  private final String sessionId;
 
   /**
    * Create the chat history viewer.
@@ -68,7 +70,16 @@ public class ChatHistoryViewer extends Composite {
    */
   public ChatHistoryViewer(Composite parent, int style, List<ConversationXmlData> conversations,
       String currentConversationId) {
+    this(parent, style, conversations, currentConversationId, "");
+  }
+
+  /**
+   * Create a history viewer scoped to one chat session.
+   */
+  public ChatHistoryViewer(Composite parent, int style, List<ConversationXmlData> conversations,
+      String currentConversationId, String sessionId) {
     super(parent, style);
+    this.sessionId = sessionId;
 
     // Cache frequently accessed objects once
     this.handCursor = Display.getCurrent().getSystemCursor(SWT.CURSOR_HAND);
@@ -371,7 +382,8 @@ public class ChatHistoryViewer extends Composite {
   private void addBackClickListener(org.eclipse.swt.widgets.Widget widget) {
     widget.addListener(SWT.MouseDown, event -> {
       if (eventBroker != null) {
-        eventBroker.post(CopilotEventConstants.TOPIC_CHAT_HISTORY_BACK_CLICKED, null);
+        eventBroker.post(CopilotEventConstants.TOPIC_CHAT_HISTORY_BACK_CLICKED,
+            ChatSessionEvent.forSession(sessionId));
       }
     });
   }
@@ -382,7 +394,8 @@ public class ChatHistoryViewer extends Composite {
         return;
       }
       if (eventBroker != null) {
-        eventBroker.post(CopilotEventConstants.TOPIC_CHAT_HISTORY_CONVERSATION_SELECTED, conversation);
+        eventBroker.post(CopilotEventConstants.TOPIC_CHAT_HISTORY_CONVERSATION_SELECTED,
+            ChatSessionEvent.forSession(sessionId, conversation));
       }
     };
   }
@@ -560,7 +573,8 @@ public class ChatHistoryViewer extends Composite {
 
         // Send event to chat view if this is the current conversation
         if (eventBroker != null && StringUtils.equals(conversation.getConversationId(), currentConversationId)) {
-          eventBroker.post(CopilotEventConstants.TOPIC_CHAT_CONVERSATION_TITLE_UPDATED, newTitle);
+          eventBroker.post(CopilotEventConstants.TOPIC_CHAT_CONVERSATION_TITLE_UPDATED,
+              ChatSessionEvent.forSession(sessionId, newTitle));
         }
 
         // Switch back to view mode

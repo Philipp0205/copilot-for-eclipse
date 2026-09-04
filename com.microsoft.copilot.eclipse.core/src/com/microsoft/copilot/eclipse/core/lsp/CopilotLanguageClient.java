@@ -427,7 +427,10 @@ public class CopilotLanguageClient extends LanguageClientImpl {
   @Override
   public void notifyProgress(ProgressParams progress) {
     var chatProgress = (ChatProgressValue) progress.getValue().getLeft();
-    CopilotCore.getPlugin().getChatEventsManager().notifyProgress(chatProgress);
+    String workDoneToken = progress.getToken().isLeft()
+        ? progress.getToken().getLeft()
+        : String.valueOf(progress.getToken().getRight());
+    CopilotCore.getPlugin().getChatEventsManager().notifyProgress(workDoneToken, chatProgress);
   }
 
   @Override

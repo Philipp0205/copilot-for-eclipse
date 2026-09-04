@@ -18,6 +18,7 @@ import com.microsoft.copilot.eclipse.ui.UiConstants;
 import com.microsoft.copilot.eclipse.ui.chat.ActionBar;
 import com.microsoft.copilot.eclipse.ui.chat.ChatView;
 import com.microsoft.copilot.eclipse.ui.chat.services.ChatServiceManager;
+import com.microsoft.copilot.eclipse.ui.chat.services.CopilotSessionRegistry;
 import com.microsoft.copilot.eclipse.ui.chat.services.UserPreferenceService;
 
 /**
@@ -42,7 +43,18 @@ public class OpenChatViewHandler extends CopilotHandler {
       IWorkbenchPage page = window.getActivePage();
       if (page != null) {
         try {
-          ChatView view = (ChatView) page.showView(Constants.CHAT_VIEW_ID);
+          ChatView view = null;
+          ChatServiceManager manager = CopilotUi.getPlugin() != null
+              ? CopilotUi.getPlugin().getChatServiceManager() : null;
+          CopilotSessionRegistry registry = manager != null ? manager.getSessionRegistry() : null;
+          if (registry != null) {
+            view = registry.getActiveView();
+          }
+          if (view == null) {
+            view = (ChatView) page.showView(Constants.CHAT_VIEW_ID);
+          } else {
+            page.activate(view);
+          }
           if (view != null) {
             view.setFocus();
             return view;

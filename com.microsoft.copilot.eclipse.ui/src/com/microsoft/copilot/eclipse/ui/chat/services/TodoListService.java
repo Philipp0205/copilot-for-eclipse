@@ -5,6 +5,8 @@ package com.microsoft.copilot.eclipse.ui.chat.services;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.eclipse.core.databinding.observable.sideeffect.ISideEffect;
 import org.eclipse.core.databinding.observable.value.IObservableValue;
@@ -29,12 +31,7 @@ import com.microsoft.copilot.eclipse.ui.utils.SwtUtils;
  * in the TodoListBar.
  */
 public class TodoListService extends ChatBaseService implements ChatProgressListener {
-  private IObservableValue<List<TodoItem>> todosObservable;
-
-  private TodoListBar todoListBar;
-  private ISideEffect todosSideEffect;
-  private ChatView boundChatView;
-  private volatile boolean requestInProgress = false;
+  private final Map<String, SessionTodoState> sessionStates = new ConcurrentHashMap<>();
 
   /**
    * Constructor.
@@ -48,33 +45,31 @@ public class TodoListService extends ChatBaseService implements ChatProgressList
       eventsManager.addChatProgressListener(this);
     }
 
-    ensureRealm(() -> {
-      todosObservable = new WritableValue<>(new ArrayList<>(), List.class);
-    });
   }
 
   /**
    * Bind the TodoListBar to the given ChatView.
    */
   public void bindTodoListBar(ChatView chatView) {
-    this.boundChatView = chatView;
-
     ensureRealm(() -> {
-      unbindTodoListBar();
-      todosSideEffect = ISideEffect.create(() -> todosObservable.getValue(), (List<TodoItem> todoList) -> {
+      unbindTodoListBar(chatView);
+      SessionTodoState state = new SessionTodoState(chatView);
+      sessionStates.put(chatView.getSessionId(), state);
+      state.todosObservable = new WritableValue<>(new ArrayList<>(), List.class);
+      state.todosSideEffect = ISideEffect.create(() -> state.todosObservable.getValue(), (List<TodoItem> todoList) -> {
         // Only show widget if there are enough todos
         boolean shouldShow = todoList != null && todoList.size() >= TodoListBar.MIN_TODOS_TO_SHOW;
 
         if (!shouldShow) {
-          disposeTodoListBar();
+          disposeTodoListBar(state);
         } else {
-          if (this.todoListBar == null || this.todoListBar.isDisposed()) {
-            this.todoListBar = new TodoListBar(chatView.getActionBar().getInputArea(), SWT.NONE);
+          if (state.todoListBar == null || state.todoListBar.isDisposed()) {
+            state.todoListBar = new TodoListBar(chatView.getActionBar().getInputArea(), SWT.NONE);
           }
           // Always position TodoListBar at the very top of the inputArea (still below the
           // StaticBanner, which lives on the outer ActionBar as a sibling of inputArea).
-          this.todoListBar.moveAbove(null);
-          this.todoListBar.buildTodoListBar(todoList);
+          state.todoListBar.moveAbove(null);
+          state.todoListBar.buildTodoListBar(todoList);
         }
       });
     });
@@ -84,15 +79,25 @@ public class TodoListService extends ChatBaseService implements ChatProgressList
    * Unbind the TodoListBar from the ChatView.
    */
   public void unbindTodoListBar() {
+    for (SessionTodoState state : new ArrayList<>(sessionStates.values())) {
+      unbindTodoListBar(state.chatView);
+    }
+  }
+
+  /** Unbind one session's todo list bar. */
+  public void unbindTodoListBar(ChatView chatView) {
+    if (chatView == null) {
+      return;
+    }
+    SessionTodoState state = sessionStates.remove(chatView.getSessionId());
+    if (state == null) {
+      return;
+    }
     ensureRealm(() -> {
-      if (todosSideEffect != null) {
-        todosSideEffect.dispose();
-        todosSideEffect = null;
+      if (state.todosSideEffect != null) {
+        state.todosSideEffect.dispose();
       }
-
-      disposeTodoListBar();
-
-      todosObservable.setValue(new ArrayList<>());
+      disposeTodoListBar(state);
     });
   }
 
@@ -102,8 +107,20 @@ public class TodoListService extends ChatBaseService implements ChatProgressList
    * @param todoList the list of todo items
    */
   public void setTodoList(List<TodoItem> todoList) {
+    CopilotSession active = CopilotUi.getPlugin().getChatServiceManager().getSessionRegistry().getActive();
+    if (active != null) {
+      setTodoList(active.getSessionId(), todoList);
+    }
+  }
+
+  /** Set todo items for a particular session. */
+  public void setTodoList(String sessionId, List<TodoItem> todoList) {
+    SessionTodoState state = sessionStates.get(sessionId);
+    if (state == null) {
+      return;
+    }
     ensureRealm(() -> {
-      todosObservable.setValue(todoList != null ? new ArrayList<>(todoList) : new ArrayList<>());
+      state.todosObservable.setValue(todoList != null ? new ArrayList<>(todoList) : new ArrayList<>());
     });
   }
 
@@ -111,9 +128,19 @@ public class TodoListService extends ChatBaseService implements ChatProgressList
    * Get the current list of todo items.
    */
   public List<TodoItem> getTodoList() {
+    CopilotSession active = CopilotUi.getPlugin().getChatServiceManager().getSessionRegistry().getActive();
+    return active != null ? getTodoList(active.getSessionId()) : new ArrayList<>();
+  }
+
+  /** Get todo items for a particular session. */
+  public List<TodoItem> getTodoList(String sessionId) {
     List<TodoItem> result = new ArrayList<>();
+    SessionTodoState state = sessionStates.get(sessionId);
+    if (state == null) {
+      return result;
+    }
     ensureRealm(() -> {
-      List<TodoItem> todos = todosObservable.getValue();
+      List<TodoItem> todos = state.todosObservable.getValue();
       if (todos != null) {
         result.addAll(todos);
       }
@@ -121,12 +148,17 @@ public class TodoListService extends ChatBaseService implements ChatProgressList
     return result;
   }
 
+  /** Return the active session's todo list bar. */
   public TodoListBar getTodoListBar() {
-    return todoListBar;
+    CopilotSession active = CopilotUi.getPlugin().getChatServiceManager().getSessionRegistry().getActive();
+    SessionTodoState state = active != null ? sessionStates.get(active.getSessionId()) : null;
+    return state != null ? state.todoListBar : null;
   }
 
+  /** Return the active chat view. */
   public ChatView getChatView() {
-    return boundChatView;
+    CopilotSession active = CopilotUi.getPlugin().getChatServiceManager().getSessionRegistry().getActive();
+    return active != null ? active.getView() : null;
   }
 
   /**
@@ -135,9 +167,15 @@ public class TodoListService extends ChatBaseService implements ChatProgressList
    * @param conversationId the conversation ID to persist the cleared todos to, can be null
    */
   public void clearTodos(String conversationId) {
+    CopilotSession session = CopilotUi.getPlugin().getChatServiceManager().getSessionRegistry()
+        .findByConversation(conversationId);
+    SessionTodoState state = session != null ? sessionStates.get(session.getSessionId()) : null;
+    if (state == null) {
+      return;
+    }
     ensureRealm(() -> {
-      todosObservable.setValue(new ArrayList<>());
-      disposeTodoListBar();
+      state.todosObservable.setValue(new ArrayList<>());
+      disposeTodoListBar(state);
     });
 
     // Persist the cleared todos to conversation history
@@ -149,16 +187,21 @@ public class TodoListService extends ChatBaseService implements ChatProgressList
     }
   }
 
+  /** Return whether the active session has a request in progress. */
   public boolean isRequestInProgress() {
-    return requestInProgress;
+    CopilotSession active = CopilotUi.getPlugin().getChatServiceManager().getSessionRegistry().getActive();
+    SessionTodoState state = active != null ? sessionStates.get(active.getSessionId()) : null;
+    return state != null && state.requestInProgress;
   }
 
   /**
    * Refresh the TodoListBar's clear button state. Call this when the request state changes (e.g., after cancel).
    */
   public void refreshClearButtonState() {
-    if (todoListBar != null && !todoListBar.isDisposed()) {
-      todoListBar.updateClearButtonState();
+    for (SessionTodoState state : sessionStates.values()) {
+      if (state.todoListBar != null && !state.todoListBar.isDisposed()) {
+        state.todoListBar.updateClearButtonState();
+      }
     }
   }
 
@@ -169,7 +212,9 @@ public class TodoListService extends ChatBaseService implements ChatProgressList
     if (!isRequestInProgress()) {
       return false;
     }
-    List<TodoItem> todos = todosObservable.getValue();
+    CopilotSession active = CopilotUi.getPlugin().getChatServiceManager().getSessionRegistry().getActive();
+    SessionTodoState state = active != null ? sessionStates.get(active.getSessionId()) : null;
+    List<TodoItem> todos = state != null ? state.todosObservable.getValue() : null;
     if (todos == null || todos.isEmpty()) {
       return false;
     }
@@ -182,11 +227,17 @@ public class TodoListService extends ChatBaseService implements ChatProgressList
       return;
     }
 
+    CopilotSession session = CopilotUi.getPlugin().getChatServiceManager().getSessionRegistry()
+        .findByConversation(progress.getConversationId());
+    SessionTodoState state = session != null ? sessionStates.get(session.getSessionId()) : null;
+    if (state == null) {
+      return;
+    }
     if (progress.getKind() == WorkDoneProgressKind.begin) {
-      requestInProgress = true;
+      state.requestInProgress = true;
       SwtUtils.invokeOnDisplayThreadAsync(this::refreshClearButtonState);
     } else if (progress.getKind() == WorkDoneProgressKind.end) {
-      requestInProgress = false;
+      state.requestInProgress = false;
       SwtUtils.invokeOnDisplayThreadAsync(this::refreshClearButtonState);
     }
   }
@@ -195,15 +246,23 @@ public class TodoListService extends ChatBaseService implements ChatProgressList
    * Dispose the TodoListBar if it exists.
    */
   public void disposeTodoListBar() {
-    if (todoListBar != null && !todoListBar.isDisposed()) {
-      Composite parent = todoListBar.getParent();
-      todoListBar.dispose();
-      todoListBar = null;
+    CopilotSession active = CopilotUi.getPlugin().getChatServiceManager().getSessionRegistry().getActive();
+    SessionTodoState state = active != null ? sessionStates.get(active.getSessionId()) : null;
+    if (state != null) {
+      disposeTodoListBar(state);
+    }
+  }
+
+  private void disposeTodoListBar(SessionTodoState state) {
+    if (state.todoListBar != null && !state.todoListBar.isDisposed()) {
+      Composite parent = state.todoListBar.getParent();
+      state.todoListBar.dispose();
+      state.todoListBar = null;
       if (parent != null && !parent.isDisposed()) {
         parent.requestLayout();
       }
     } else {
-      todoListBar = null;
+      state.todoListBar = null;
     }
   }
 
@@ -214,6 +273,19 @@ public class TodoListService extends ChatBaseService implements ChatProgressList
     ChatEventsManager eventsManager = CopilotCore.getPlugin().getChatEventsManager();
     if (eventsManager != null) {
       eventsManager.removeChatProgressListener(this);
+    }
+    unbindTodoListBar();
+  }
+
+  private static final class SessionTodoState {
+    private final ChatView chatView;
+    private IObservableValue<List<TodoItem>> todosObservable;
+    private TodoListBar todoListBar;
+    private ISideEffect todosSideEffect;
+    private volatile boolean requestInProgress;
+
+    private SessionTodoState(ChatView chatView) {
+      this.chatView = chatView;
     }
   }
 

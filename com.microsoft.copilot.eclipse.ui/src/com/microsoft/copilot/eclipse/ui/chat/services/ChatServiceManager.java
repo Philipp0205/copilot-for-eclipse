@@ -35,11 +35,13 @@ public class ChatServiceManager implements IChatServiceManager {
   private TodoListService todoListService;
   private ChatFontService chatFontService;
   private ContextWindowService contextWindowService;
+  private final CopilotSessionRegistry sessionRegistry;
 
   /**
    * Constructor for the ChatServiceManager.
    */
   public ChatServiceManager() {
+    sessionRegistry = new CopilotSessionRegistry();
     this.lsConnection = CopilotCore.getPlugin().getCopilotLanguageServer();
     this.authStatusManager = CopilotCore.getPlugin().getAuthStatusManager();
     chatCompletionService = new ChatCompletionService(this.lsConnection, this.authStatusManager);
@@ -189,6 +191,13 @@ public class ChatServiceManager implements IChatServiceManager {
    */
   public ContextWindowService getContextWindowService() {
     return contextWindowService;
+  }
+
+  /**
+   * Get the registry that coordinates independently running chat views.
+   */
+  public CopilotSessionRegistry getSessionRegistry() {
+    return sessionRegistry;
   }
 
   /**

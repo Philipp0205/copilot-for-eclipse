@@ -62,6 +62,12 @@
 		<!-- ChatView toolbar contributions -->
 		<menuContribution locationURI="toolbar:com.microsoft.copilot.eclipse.ui.chat.ChatView">
 			<command
+				commandId="com.microsoft.copilot.eclipse.commands.newCopilotSession"
+				icon="icons/chat/new_chat.png"
+				tooltip="%command.newCopilotSession.name"
+				style="push">
+			</command>
+			<command
 				commandId="com.microsoft.copilot.eclipse.commands.newConversation"
 				icon="icons/chat/new_chat.png"
 				tooltip="%command.newConversation.name"
@@ -92,6 +98,12 @@
 				commandId="com.microsoft.copilot.eclipse.commands.openGitHubJobs"
 				icon="icons/jobs/github_jobs.png"
 				label="%command.openGitHubJobs.name"
+				style="push">
+			</command>
+			<command
+				commandId="com.microsoft.copilot.eclipse.commands.openCopilotSessions"
+				icon="icons/chat/chat_history.png"
+				label="%command.openCopilotSessions.name"
 				style="push">
 			</command>
 		</menuContribution>
@@ -229,7 +241,15 @@
 			icon="icons/github_copilot.png"
 			class="com.microsoft.copilot.eclipse.ui.chat.ChatView"
 			category="com.microsoft.copilot.eclipse.chat"
+			allowMultiple="true"
 			inject="true">
+		</view>
+		<view
+			id="com.microsoft.copilot.eclipse.ui.chat.CopilotSessionsView"
+			name="%page.showViewPageCopilotSessions.name"
+			icon="icons/chat/chat_history.png"
+			class="com.microsoft.copilot.eclipse.ui.chat.CopilotSessionsView"
+			category="com.microsoft.copilot.eclipse.chat">
 		</view>
 	</extension>
 	<!-- Commands registration -->
@@ -268,6 +288,16 @@
 				name="%command.openChatView.mode"
 				values="">
 			</commandParameter>
+		</command>
+		<command
+			categoryId="com.microsoft.copilot.eclipse.ui.githubCopilot"
+			id="com.microsoft.copilot.eclipse.commands.newCopilotSession"
+			name="%command.newCopilotSession.name">
+		</command>
+		<command
+			categoryId="com.microsoft.copilot.eclipse.ui.githubCopilot"
+			id="com.microsoft.copilot.eclipse.commands.openCopilotSessions"
+			name="%command.openCopilotSessions.name">
 		</command>
 		<command
 			id="com.microsoft.copilot.eclipse.commands.signOut"
@@ -475,6 +505,14 @@
 		<handler
 			class="com.microsoft.copilot.eclipse.ui.handlers.OpenChatViewHandler"
 			commandId="com.microsoft.copilot.eclipse.commands.openChatView">
+		</handler>
+		<handler
+			class="com.microsoft.copilot.eclipse.ui.handlers.NewCopilotSessionHandler"
+			commandId="com.microsoft.copilot.eclipse.commands.newCopilotSession">
+		</handler>
+		<handler
+			class="com.microsoft.copilot.eclipse.ui.handlers.OpenCopilotSessionsHandler"
+			commandId="com.microsoft.copilot.eclipse.commands.openCopilotSessions">
 		</handler>
 		<handler
 			class="com.microsoft.copilot.eclipse.ui.handlers.AutoShowCompletionsHandler"
