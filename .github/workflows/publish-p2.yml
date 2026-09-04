@@ -53,7 +53,7 @@ jobs:
           touch com.microsoft.copilot.eclipse.repository/target/repository/.nojekyll
 
       - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Upload P2 repository
         uses: actions/upload-pages-artifact@v5
@@ -71,4 +71,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
