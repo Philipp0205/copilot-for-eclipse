@@ -37,10 +37,10 @@ To use GitHub Copilot, an active subscription is required. Learn more about busi
 3. Restart Eclipse.
 4. Sign in to GitHub Copilot from Eclipse.
 
-### Option 2: Install from update site
+### Option 2: Install this modified build from its update site
 
 1. In Eclipse, open **Help → Install New Software…**
-2. Add this update site URL: `https://azuredownloads-g3ahgwb5b8bkbxhd.b01.azurefd.net/github-copilot/`
+2. Add this GitHub Pages update site URL: `https://philipp0205.github.io/copilot-for-eclipse/`
 3. Select **GitHub Copilot** and complete installation.
 4. Restart Eclipse and sign in.
 
